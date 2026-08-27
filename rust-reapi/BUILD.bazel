@@ -9,7 +9,10 @@ rust_prost_library(
 
 rust_library(
     name = "rust_reapi_lib",
-    srcs = ["src/lib.rs"] + glob(["src/services/**/*.rs"]),
+    srcs = ["src/lib.rs"] + glob([
+        "src/services/**/*.rs",
+        "src/storage/**/*.rs",
+    ]),
     crate_name = "rust_reapi",
     edition = crate_edition(),
     deps = [":remote_execution_rust"] + all_crate_deps(normal = True),
@@ -36,6 +39,21 @@ rust_test(
         ":remote_execution_rust",
         ":rust_reapi_lib",
     ] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)
+
+rust_test(
+    name = "unit_test",
+    size = "small",
+    srcs = ["src/lib.rs"] + glob([
+        "src/services/**/*.rs",
+        "src/storage/**/*.rs",
+    ]),
+    crate_root = "src/lib.rs",
+    edition = crate_edition(),
+    deps = [":remote_execution_rust"] + all_crate_deps(
         normal = True,
         normal_dev = True,
     ),
