@@ -1,0 +1,3 @@
+[workspace]
+members = ["rust-reapi", "rust-reapi"]
+resolver = "3"

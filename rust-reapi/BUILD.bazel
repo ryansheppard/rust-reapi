@@ -1,0 +1,42 @@
+load("@crates//:defs.bzl", "all_crate_deps", "crate_edition")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+load("@rules_rust_prost//:defs.bzl", "rust_prost_library")
+
+rust_prost_library(
+    name = "remote_execution_rust",
+    proto = "@bazel_remote_apis//build/bazel/remote/execution/v2:remote_execution_proto",
+)
+
+rust_library(
+    name = "rust_reapi_lib",
+    srcs = ["src/lib.rs"] + glob(["src/services/**/*.rs"]),
+    crate_name = "rust_reapi",
+    edition = crate_edition(),
+    deps = [":remote_execution_rust"] + all_crate_deps(normal = True),
+)
+
+rust_binary(
+    name = "rust_reapi_cache",
+    srcs = ["src/bin/cache.rs"],
+    crate_root = "src/bin/cache.rs",
+    edition = crate_edition(),
+    deps = [
+        ":remote_execution_rust",
+        ":rust_reapi_lib",
+    ] + all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "asset_client_test",
+    size = "small",
+    srcs = ["tests/asset_client.rs"],
+    crate_root = "tests/asset_client.rs",
+    edition = crate_edition(),
+    deps = [
+        ":remote_execution_rust",
+        ":rust_reapi_lib",
+    ] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)

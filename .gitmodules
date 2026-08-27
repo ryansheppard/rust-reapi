@@ -1,0 +1,6 @@
+[submodule "vendor/remote-apis"]
+	path = vendor/remote-apis
+	url = https://github.com/bazelbuild/remote-apis.git
+[submodule "vendor/googleapis"]
+	path = vendor/googleapis
+	url = https://github.com/googleapis/googleapis.git

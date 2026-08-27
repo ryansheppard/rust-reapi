@@ -1,0 +1,41 @@
+module(
+    name = "rust-reapi",
+    version = "1.0",
+)
+
+bazel_dep(name = "rules_rust", version = "0.73.0")
+bazel_dep(name = "rules_rust_prost", version = "0.73.0")
+bazel_dep(name = "rules_proto", version = "7.1.0")
+
+# because of gRPC pinned in remote-apis
+bazel_dep(name = "grpc", version = "1.83.0")
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2024",
+    versions = ["1.98.0"],
+)
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crates",
+    cargo_lockfile = "//:Cargo.lock",
+    manifests = ["//:Cargo.toml"],
+)
+crate.annotation(
+    crate = "protoc-gen-prost",
+    gen_binaries = ["protoc-gen-prost"],
+)
+crate.annotation(
+    crate = "protoc-gen-tonic",
+    gen_binaries = ["protoc-gen-tonic"],
+)
+use_repo(crate, "crates")
+
+register_toolchains("//:prost_toolchain")
+
+bazel_dep(name = "bazel_remote_apis", version = "1.0.0")
+local_path_override(
+    module_name = "bazel_remote_apis",
+    path = "vendor/remote-apis",
+)
