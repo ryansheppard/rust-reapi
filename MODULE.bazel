@@ -35,6 +35,7 @@ use_repo(crate, "crates")
 register_toolchains("//:prost_toolchain")
 
 bazel_dep(name = "bazel_remote_apis", version = "1.0.0")
+bazel_dep(name = "googleapis", version = "0.0.0-20260130-c0fcb356")
 local_path_override(
     module_name = "bazel_remote_apis",
     path = "vendor/remote-apis",

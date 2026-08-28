@@ -3,6 +3,9 @@ name = "rust_reapi"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+bazel_build = []
+
 [dependencies]
 tonic = "0.14.6"
 prost = "0.14.4"

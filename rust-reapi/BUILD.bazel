@@ -7,15 +7,24 @@ rust_prost_library(
     proto = "@bazel_remote_apis//build/bazel/remote/execution/v2:remote_execution_proto",
 )
 
+rust_prost_library(
+    name = "google_rpc_status_rust",
+    proto = "@googleapis//google/rpc:status_proto",
+)
+
 rust_library(
     name = "rust_reapi_lib",
-    srcs = ["src/lib.rs"] + glob([
+    srcs = ["src/lib.rs", "src/proto.rs"] + glob([
         "src/services/**/*.rs",
         "src/storage/**/*.rs",
     ]),
     crate_name = "rust_reapi",
     edition = crate_edition(),
-    deps = [":remote_execution_rust"] + all_crate_deps(normal = True),
+    rustc_flags = ["--cfg", "feature=\"bazel_build\""],
+    deps = [
+        ":google_rpc_status_rust",
+        ":remote_execution_rust",
+    ] + all_crate_deps(normal = True),
 )
 
 rust_binary(
@@ -32,7 +41,10 @@ rust_binary(
 rust_test(
     name = "asset_client_test",
     size = "small",
-    srcs = ["tests/asset_client.rs"],
+    srcs = [
+        "tests/asset_client.rs",
+        "tests/common/mod.rs",
+    ],
     crate_root = "tests/asset_client.rs",
     edition = crate_edition(),
     deps = [
@@ -47,13 +59,17 @@ rust_test(
 rust_test(
     name = "unit_test",
     size = "small",
-    srcs = ["src/lib.rs"] + glob([
+    srcs = ["src/lib.rs", "src/proto.rs"] + glob([
         "src/services/**/*.rs",
         "src/storage/**/*.rs",
     ]),
     crate_root = "src/lib.rs",
     edition = crate_edition(),
-    deps = [":remote_execution_rust"] + all_crate_deps(
+    rustc_flags = ["--cfg", "feature=\"bazel_build\""],
+    deps = [
+        ":google_rpc_status_rust",
+        ":remote_execution_rust",
+    ] + all_crate_deps(
         normal = True,
         normal_dev = True,
     ),
