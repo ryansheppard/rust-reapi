@@ -4,7 +4,8 @@ use remote_execution_proto::build::bazel::remote::execution::v2::{
     BatchReadBlobsRequest, BatchReadBlobsResponse, BatchUpdateBlobsRequest,
     BatchUpdateBlobsResponse, FindMissingBlobsRequest, FindMissingBlobsResponse, GetTreeRequest,
     GetTreeResponse, SpliceBlobRequest, SpliceBlobResponse, SplitBlobRequest, SplitBlobResponse,
-    batch_update_blobs_response::Response as BlobResponse,
+    batch_read_blobs_response::Response as BlobReadResponse,
+    batch_update_blobs_response::Response as BlobUpdateResponse,
     content_addressable_storage_server::ContentAddressableStorage,
 };
 use status_proto::google::rpc::Status as RpcStatus;
@@ -47,6 +48,7 @@ impl ContentAddressableStorage for CasService {
         for digest in request.blob_digests {
             let key = BlobKey {
                 instance: request.instance_name.clone(),
+                // TODO: Handle/infer digest functions
                 algorithm: "sha256".to_string(),
                 hash: digest.hash.clone(),
             };
@@ -68,9 +70,65 @@ impl ContentAddressableStorage for CasService {
 
     async fn batch_read_blobs(
         &self,
-        _request: Request<BatchReadBlobsRequest>,
+        request: Request<BatchReadBlobsRequest>,
     ) -> Result<Response<BatchReadBlobsResponse>, Status> {
-        Err(Status::unimplemented("not implemented yet"))
+        let request = request.into_inner();
+        let mut responses = Vec::new();
+
+        for compressor in request.acceptable_compressors {
+            if compressor != 0 {
+                return Err(Status::invalid_argument("unsupported compression method"));
+            }
+        }
+
+        for digest in request.digests {
+            let key = BlobKey {
+                instance: request.instance_name.clone(),
+                algorithm: "sha256".to_string(),
+                hash: digest.hash.clone(),
+            };
+
+            let ret = self.store.get(&key);
+
+            let resp = match ret {
+                Ok(value) => match value {
+                    Some(blob) => BlobReadResponse {
+                        digest: Some(digest),
+                        data: blob,
+                        compressor: 0,
+                        status: Some(RpcStatus {
+                            code: 0,
+                            message: String::new(),
+                            details: vec![],
+                        }),
+                    },
+                    None => BlobReadResponse {
+                        digest: Some(digest),
+                        data: Vec::new(),
+                        compressor: 0,
+                        status: Some(RpcStatus {
+                            code: 5,
+                            message: String::new(),
+                            details: vec![],
+                        }),
+                    },
+                },
+                Err(err) => BlobReadResponse {
+                    digest: Some(digest),
+                    data: Vec::new(),
+                    compressor: 0,
+                    status: Some(RpcStatus {
+                        code: 13,
+                        message: err.to_string(),
+                        details: vec![],
+                    }),
+                },
+            };
+
+            responses.push(resp);
+        }
+
+        Ok(Response::new(BatchReadBlobsResponse { responses }))
     }
 
     async fn batch_update_blobs(
@@ -109,7 +167,7 @@ impl ContentAddressableStorage for CasService {
                 },
             };
 
-            responses.push(BlobResponse {
+            responses.push(BlobUpdateResponse {
                 digest: Some(digest),
                 status: Some(status),
             });
