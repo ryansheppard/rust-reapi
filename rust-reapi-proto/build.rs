@@ -12,7 +12,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         googleapis.join("google/api/http.proto"),
         googleapis.join("google/api/annotations.proto"),
         googleapis.join("google/longrunning/operations.proto"),
-        googleapis.join("google/rpc/status.proto"),
     ];
 
     unsafe {
@@ -20,6 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tonic_prost_build::configure()
+        .extern_path(".google.rpc", "::status_proto::google::rpc")
         .include_file("_protos.rs")
         .compile_protos(
             &protos,

@@ -703,6 +703,7 @@ dependencies = [
  "prost",
  "prost-types",
  "protoc-bin-vendored",
+ "status_proto",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
@@ -717,6 +718,7 @@ dependencies = [
  "protoc-gen-prost",
  "protoc-gen-tonic",
  "remote_execution_proto",
+ "status_proto",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -777,6 +779,18 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys",
+]
+
+[[package]]
+name = "status_proto"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "prost-types",
+ "protoc-bin-vendored",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
 ]
 
 [[package]]

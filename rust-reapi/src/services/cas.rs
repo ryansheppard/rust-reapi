@@ -1,6 +1,5 @@
 use std::pin::Pin;
 
-use crate::proto::RpcStatus;
 use remote_execution_proto::build::bazel::remote::execution::v2::{
     BatchReadBlobsRequest, BatchReadBlobsResponse, BatchUpdateBlobsRequest,
     BatchUpdateBlobsResponse, FindMissingBlobsRequest, FindMissingBlobsResponse, GetTreeRequest,
@@ -8,6 +7,7 @@ use remote_execution_proto::build::bazel::remote::execution::v2::{
     batch_update_blobs_response::Response as BlobResponse,
     content_addressable_storage_server::ContentAddressableStorage,
 };
+use status_proto::google::rpc::Status as RpcStatus;
 use tonic::{Request, Response, Status};
 
 use crate::storage::{BlobKey, BlobStore};

@@ -8,21 +8,20 @@ rust_prost_library(
 )
 
 rust_prost_library(
-    name = "google_rpc_status_rust",
+    name = "status_proto",
     proto = "@googleapis//google/rpc:status_proto",
 )
 
 rust_library(
     name = "rust_reapi_lib",
-    srcs = ["src/lib.rs", "src/proto.rs"] + glob([
+    srcs = ["src/lib.rs"] + glob([
         "src/services/**/*.rs",
         "src/storage/**/*.rs",
     ]),
     crate_name = "rust_reapi",
     edition = crate_edition(),
-    rustc_flags = ["--cfg", "feature=\"bazel_build\""],
     deps = [
-        ":google_rpc_status_rust",
+        ":status_proto",
         ":remote_execution_rust",
     ] + all_crate_deps(normal = True),
 )
@@ -59,15 +58,14 @@ rust_test(
 rust_test(
     name = "unit_test",
     size = "small",
-    srcs = ["src/lib.rs", "src/proto.rs"] + glob([
+    srcs = ["src/lib.rs"] + glob([
         "src/services/**/*.rs",
         "src/storage/**/*.rs",
     ]),
     crate_root = "src/lib.rs",
     edition = crate_edition(),
-    rustc_flags = ["--cfg", "feature=\"bazel_build\""],
     deps = [
-        ":google_rpc_status_rust",
+        ":status_proto",
         ":remote_execution_rust",
     ] + all_crate_deps(
         normal = True,
