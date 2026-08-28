@@ -6,7 +6,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let googleapis = workspace.join("vendor/googleapis");
 
     let protos = [
-        remote_apis.join("build/bazel/semver/semver.proto"),
         remote_apis.join("build/bazel/remote/execution/v2/remote_execution.proto"),
         remote_apis.join("build/bazel/remote/asset/v1/remote_asset.proto"),
         googleapis.join("google/api/http.proto"),
@@ -19,6 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tonic_prost_build::configure()
+        .extern_path(".build.bazel.semver", "::semver_proto::build::bazel::semver")
         .extern_path(".google.rpc", "::status_proto::google::rpc")
         .include_file("_protos.rs")
         .compile_protos(

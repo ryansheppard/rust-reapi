@@ -703,6 +703,7 @@ dependencies = [
  "prost",
  "prost-types",
  "protoc-bin-vendored",
+ "semver_proto",
  "status_proto",
  "tonic",
  "tonic-prost",
@@ -718,6 +719,7 @@ dependencies = [
  "protoc-gen-prost",
  "protoc-gen-tonic",
  "remote_execution_proto",
+ "semver_proto",
  "status_proto",
  "thiserror",
  "tokio",
@@ -737,6 +739,18 @@ dependencies = [
  "libc",
  "linux-raw-sys",
  "windows-sys",
+]
+
+[[package]]
+name = "semver_proto"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "prost-types",
+ "protoc-bin-vendored",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
 ]
 
 [[package]]

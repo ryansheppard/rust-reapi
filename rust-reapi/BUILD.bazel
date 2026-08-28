@@ -8,6 +8,11 @@ rust_prost_library(
 )
 
 rust_prost_library(
+    name = "semver_proto",
+    proto = "@bazel_remote_apis//build/bazel/semver:semver_proto",
+)
+
+rust_prost_library(
     name = "status_proto",
     proto = "@googleapis//google/rpc:status_proto",
 )
@@ -21,8 +26,9 @@ rust_library(
     crate_name = "rust_reapi",
     edition = crate_edition(),
     deps = [
-        ":status_proto",
         ":remote_execution_rust",
+        ":semver_proto",
+        ":status_proto",
     ] + all_crate_deps(normal = True),
 )
 
@@ -65,8 +71,9 @@ rust_test(
     crate_root = "src/lib.rs",
     edition = crate_edition(),
     deps = [
-        ":status_proto",
         ":remote_execution_rust",
+        ":semver_proto",
+        ":status_proto",
     ] + all_crate_deps(
         normal = True,
         normal_dev = True,
