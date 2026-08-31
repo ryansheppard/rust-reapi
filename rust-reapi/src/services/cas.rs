@@ -11,7 +11,7 @@ use remote_execution_proto::build::bazel::remote::execution::v2::{
 use status_proto::google::rpc::Status as RpcStatus;
 use tonic::{Request, Response, Status};
 
-use crate::storage::{BlobKey, BlobStore};
+use crate::storage::{BlobKey, BlobStore, CacheKind};
 
 pub struct CasService {
     store: Arc<dyn BlobStore + Send + Sync>,
@@ -46,6 +46,7 @@ impl ContentAddressableStorage for CasService {
                 // TODO: Handle/infer digest functions
                 algorithm: "sha256".to_string(),
                 hash: digest.hash.clone(),
+                kind: CacheKind::ContentAddressableStorage,
             };
 
             let exists = self
@@ -81,6 +82,7 @@ impl ContentAddressableStorage for CasService {
                 instance: request.instance_name.clone(),
                 algorithm: "sha256".to_string(),
                 hash: digest.hash.clone(),
+                kind: CacheKind::ContentAddressableStorage,
             };
 
             let ret = self.store.get(&key);
@@ -147,6 +149,7 @@ impl ContentAddressableStorage for CasService {
                 instance: request.instance_name.clone(),
                 algorithm: "sha256".to_string(),
                 hash: digest.hash.clone(),
+                kind: CacheKind::ContentAddressableStorage,
             };
 
             let status = match self.store.put(key, req.data) {

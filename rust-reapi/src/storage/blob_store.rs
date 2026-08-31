@@ -7,10 +7,17 @@ pub enum StorageError {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub enum CacheKind {
+    ContentAddressableStorage,
+    ActionCache,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct BlobKey {
     pub instance: String,
     pub algorithm: String,
     pub hash: String,
+    pub kind: CacheKind,
 }
 
 pub trait BlobStore {

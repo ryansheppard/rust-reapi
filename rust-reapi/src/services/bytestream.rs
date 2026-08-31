@@ -6,7 +6,7 @@ use bytestream_proto::google::bytestream::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::storage::{BlobKey, BlobStore};
+use crate::storage::{BlobKey, BlobStore, CacheKind};
 
 const READ_CHUNK_SIZE: usize = 64 * 1024;
 
@@ -238,6 +238,7 @@ fn resolve_blob_key(
         instance: resource.instance,
         algorithm,
         hash: resource.hash,
+        kind: CacheKind::ContentAddressableStorage,
     })
 }
 
@@ -286,6 +287,7 @@ mod tests {
             instance: "test".to_string(),
             algorithm: "sha256".to_string(),
             hash: "abc123".to_string(),
+            kind: CacheKind::ContentAddressableStorage,
         };
 
         assert_eq!(actual, expected);

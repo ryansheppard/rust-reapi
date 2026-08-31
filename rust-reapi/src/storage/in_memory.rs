@@ -42,6 +42,8 @@ impl BlobStore for InMemoryStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::storage::CacheKind;
+
     use super::*;
 
     #[test]
@@ -51,6 +53,7 @@ mod tests {
             instance: "test".to_string(),
             algorithm: "sha256".to_string(),
             hash: "123abc".to_string(),
+            kind: CacheKind::ContentAddressableStorage,
         };
 
         let result = in_memory.get(&test_key).expect("get should not fail");
@@ -64,6 +67,7 @@ mod tests {
             instance: "test".to_string(),
             algorithm: "sha256".to_string(),
             hash: "123abc".to_string(),
+            kind: CacheKind::ContentAddressableStorage,
         };
 
         let result = in_memory
@@ -79,6 +83,7 @@ mod tests {
             instance: "test".to_string(),
             algorithm: "sha256".to_string(),
             hash: "123abc".to_string(),
+            kind: CacheKind::ContentAddressableStorage,
         };
 
         in_memory
