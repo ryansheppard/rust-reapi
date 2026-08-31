@@ -18,8 +18,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tonic_prost_build::configure()
-        .extern_path(".build.bazel.semver", "::semver_proto::build::bazel::semver")
+        .extern_path(
+            ".build.bazel.semver",
+            "::semver_proto::build::bazel::semver",
+        )
         .extern_path(".google.rpc", "::status_proto::google::rpc")
+        .extern_path(
+            ".google.bytestream",
+            "::bytestream_proto::google::bytestream",
+        )
         .include_file("_protos.rs")
         .compile_protos(
             &protos,

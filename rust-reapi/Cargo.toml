@@ -15,6 +15,7 @@ tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "net"] }
 remote_execution_proto = { path = "../rust-reapi-proto/" }
 semver_proto = { path = "../semver-proto/" }
 status_proto = { path = "../status-proto/" }
+bytestream_proto = { path = "../bytestream-proto/" }
 thiserror = "2.0.20"
 
 [dev-dependencies]

@@ -6,7 +6,7 @@ pub enum StorageError {
     Unavailable(String),
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct BlobKey {
     pub instance: String,
     pub algorithm: String,

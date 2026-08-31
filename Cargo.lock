@@ -96,6 +96,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "bytestream_proto"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "prost-types",
+ "protoc-bin-vendored",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -700,6 +712,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 name = "remote_execution_proto"
 version = "0.1.0"
 dependencies = [
+ "bytestream_proto",
  "prost",
  "prost-types",
  "protoc-bin-vendored",
@@ -714,6 +727,7 @@ dependencies = [
 name = "rust_reapi"
 version = "0.1.0"
 dependencies = [
+ "bytestream_proto",
  "prost",
  "prost-types",
  "protoc-gen-prost",
