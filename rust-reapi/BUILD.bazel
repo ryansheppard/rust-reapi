@@ -60,6 +60,7 @@ rust_test(
     crate_root = "tests/asset_client.rs",
     edition = crate_edition(),
     deps = [
+        ":bytestream_proto",
         ":remote_execution_rust",
         ":rust_reapi_lib",
     ] + all_crate_deps(

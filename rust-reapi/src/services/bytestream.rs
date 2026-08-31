@@ -8,6 +8,8 @@ use tonic::{Request, Response, Status};
 
 use crate::storage::{BlobKey, BlobStore};
 
+const READ_CHUNK_SIZE: usize = 64 * 1024;
+
 #[derive(Debug, thiserror::Error)]
 enum ParseResourceError {
     #[error("invalid bytestream resource name")]
@@ -26,6 +28,7 @@ enum Compression {
 #[derive(Debug, PartialEq)]
 struct ParsedReadResource {
     instance: String,
+    upload_id: Option<String>,
     algorithm: Option<String>,
     hash: String,
     expected_size: i64,
@@ -57,15 +60,96 @@ impl ByteStream for ByteStreamService {
         request: Request<ReadRequest>,
     ) -> Result<Response<Self::ReadStream>, Status> {
         let request = request.into_inner();
-        let _parsed = parse_bytestream_resource_name(request.resource_name.as_str());
-        Err(Status::unimplemented("not implemented yet"))
+
+        let parsed = parse_bytestream_resource_name(request.resource_name.as_str())
+            .map_err(|err| Status::internal(err.to_string()))?;
+        let key = resolve_blob_key(parsed, &["sha256"])?;
+
+        let blob = self
+            .store
+            .get(&key)
+            .map_err(|err| Status::internal(err.to_string()))?
+            .ok_or_else(|| Status::not_found("blob not found"))?;
+
+        let offset = usize::try_from(request.read_offset)
+            .map_err(|_| Status::invalid_argument("negative read offset"))?;
+
+        if offset > blob.len() {
+            return Err(Status::out_of_range("read offset larger than blob size"));
+        }
+
+        let available = &blob[offset..];
+        let limit = match request.read_limit {
+            0 => available.len(),
+            limit => usize::try_from(limit)
+                .map_err(|_| Status::invalid_argument("negative read limit"))?
+                .min(available.len()),
+        };
+
+        let responses = available[..limit]
+            .chunks(READ_CHUNK_SIZE)
+            .map(|chunk| {
+                Ok(ReadResponse {
+                    data: chunk.to_vec(),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Ok(Response::new(Box::pin(tonic::codegen::tokio_stream::iter(
+            responses,
+        ))))
     }
 
     async fn write(
         &self,
-        _request: Request<tonic::Streaming<WriteRequest>>,
+        request: Request<tonic::Streaming<WriteRequest>>,
     ) -> Result<Response<WriteResponse>, Status> {
-        Err(Status::unimplemented("not implemented yet"))
+        let mut requests = request.into_inner();
+
+        let mut accumulator: Vec<u8> = Vec::new();
+        let mut resource_name = None;
+
+        while let Some(chunk) = requests.message().await? {
+            if chunk.write_offset != accumulator.len() as i64 {
+                return Err(Status::invalid_argument("unexpected write offset"));
+            }
+
+            if resource_name.is_some() {
+                if !chunk.resource_name.is_empty() {
+                    return Err(Status::invalid_argument("unexpected chunk name"));
+                }
+            } else {
+                if chunk.resource_name.is_empty() {
+                    return Err(Status::invalid_argument(
+                        "expected chunk name on first write",
+                    ));
+                }
+
+                resource_name = Some(
+                    parse_bytestream_resource_name(chunk.resource_name.as_str())
+                        .map_err(|err| Status::invalid_argument(err.to_string()))?,
+                );
+            }
+
+            accumulator.extend_from_slice(&chunk.data);
+
+            if chunk.finish_write {
+                let resource_name = resource_name.expect("expected resource name");
+                let key = resolve_blob_key(resource_name, &["sha256"])?;
+
+                let committed_size = i64::try_from(accumulator.len())
+                    .map_err(|_| Status::internal("blob exceeds exepected size"))?;
+
+                self.store
+                    .put(key, accumulator)
+                    .map_err(|err| Status::internal(err.to_string()))?;
+                return Ok(Response::new(WriteResponse { committed_size }));
+            }
+        }
+
+        Err(Status::invalid_argument(
+            "write stream ended before finish_write",
+        ))
     }
 
     async fn query_write_status(
@@ -86,7 +170,20 @@ fn parse_bytestream_resource_name(
         .position(|part| *part == "blobs" || *part == "compressed-blobs")
         .ok_or(ParseResourceError::InvalidShape)?;
 
-    let instance = parts[..marker_index].join("/");
+    let prefix = &parts[..marker_index];
+
+    let (instance, upload_id) = if prefix.len() >= 2
+        && prefix[prefix.len() - 2] == "uploads"
+        && !prefix[prefix.len() - 1].is_empty()
+    {
+        (
+            prefix[..prefix.len() - 2].join("/"),
+            Some(prefix[prefix.len() - 1].to_owned()),
+        )
+    } else {
+        (prefix.join("/"), None)
+    };
+
     let marker = parts[marker_index];
     let suffix = &parts[marker_index + 1..];
 
@@ -119,6 +216,7 @@ fn parse_bytestream_resource_name(
 
     Ok(ParsedReadResource {
         instance,
+        upload_id,
         algorithm: algorithm.to_owned(),
         hash: hash.to_owned(),
         compression,
@@ -154,6 +252,7 @@ mod tests {
 
         let expected = ParsedReadResource {
             instance: "test".to_string(),
+            upload_id: None,
             algorithm: Some("sha256".to_string()),
             hash: "abc123".to_string(),
             compression: Compression::Identity,
@@ -164,9 +263,18 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_upload_bytestream_url() {
+        let resource = "test/uploads/upload-123/blobs/sha256/abc123/12";
+        let actual = parse_bytestream_resource_name(resource).unwrap();
+
+        assert_eq!(actual.instance, "test");
+    }
+
+    #[test]
     fn test_resolve_blob_key() {
         let parsed = ParsedReadResource {
             instance: "test".to_string(),
+            upload_id: None,
             algorithm: Some("sha256".to_string()),
             hash: "abc123".to_string(),
             compression: Compression::Identity,
