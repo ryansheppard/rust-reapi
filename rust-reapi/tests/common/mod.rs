@@ -1,5 +1,7 @@
 #![allow(dead_code)] // TODO: probably can split this up between clients to avoid
 
+use std::sync::Arc;
+
 use remote_execution_proto::build::bazel::remote::execution::v2::{
     capabilities_client::CapabilitiesClient, capabilities_server::CapabilitiesServer,
     content_addressable_storage_client::ContentAddressableStorageClient,
@@ -21,9 +23,7 @@ pub async fn cas_client()
 
     let server = tokio::spawn(async move {
         Server::builder()
-            .add_service(ContentAddressableStorageServer::new(CasService::new(
-                InMemoryStore::new(),
-            )))
+            .add_service(ContentAddressableStorageServer::new(CasService::new(Arc::new(InMemoryStore::new()))))
             .serve_with_incoming(TcpListenerStream::new(listener))
             .await
             .unwrap_or_else(|error| panic!("test server failed: {error}"));

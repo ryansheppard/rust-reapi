@@ -1,4 +1,4 @@
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 
 use remote_execution_proto::build::bazel::remote::execution::v2::{
     BatchReadBlobsRequest, BatchReadBlobsResponse, BatchUpdateBlobsRequest,
@@ -14,17 +14,12 @@ use tonic::{Request, Response, Status};
 use crate::storage::{BlobKey, BlobStore};
 
 pub struct CasService {
-    store: Box<dyn BlobStore + Send + Sync>,
+    store: Arc<dyn BlobStore + Send + Sync>,
 }
 
 impl CasService {
-    pub fn new<S>(store: S) -> Self
-    where
-        S: BlobStore + Send + Sync + 'static,
-    {
-        Self {
-            store: Box::new(store),
-        }
+    pub fn new(store: Arc<dyn BlobStore + Send + Sync>) -> Self {
+        Self { store }
     }
 }
 

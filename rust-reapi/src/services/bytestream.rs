@@ -1,10 +1,9 @@
-use std::{fmt::Error, num::ParseIntError, pin::Pin};
+use std::{num::ParseIntError, pin::Pin, sync::Arc};
 
 use bytestream_proto::google::bytestream::{
     QueryWriteStatusRequest, QueryWriteStatusResponse, ReadRequest, ReadResponse, WriteRequest,
     WriteResponse, byte_stream_server::ByteStream,
 };
-use remote_execution_proto::build::bazel::remote::execution::v2::compressor;
 use tonic::{Request, Response, Status};
 
 use crate::storage::{BlobKey, BlobStore};
@@ -34,17 +33,12 @@ struct ParsedReadResource {
 }
 
 pub struct ByteStreamService {
-    store: Box<dyn BlobStore + Send + Sync>,
+    store: Arc<dyn BlobStore + Send + Sync>,
 }
 
 impl ByteStreamService {
-    pub fn new<S>(store: S) -> Self
-    where
-        S: BlobStore + Send + Sync + 'static,
-    {
-        Self {
-            store: Box::new(store),
-        }
+    pub fn new(store: Arc<dyn BlobStore + Send + Sync>) -> Self {
+        Self { store }
     }
 }
 
@@ -60,8 +54,10 @@ impl ByteStream for ByteStreamService {
 
     async fn read(
         &self,
-        _request: Request<ReadRequest>,
+        request: Request<ReadRequest>,
     ) -> Result<Response<Self::ReadStream>, Status> {
+        let request = request.into_inner();
+        let _parsed = parse_bytestream_resource_name(request.resource_name.as_str());
         Err(Status::unimplemented("not implemented yet"))
     }
 
