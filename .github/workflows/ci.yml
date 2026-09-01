@@ -23,7 +23,7 @@ jobs:
         with:
           disk-cache: ${{ github.workflow }}
           repository-cache: true
-      - run: bazel test //...
+      - run: bazel test //... --test_output=errors
   smoke_test:
     name: Run smoke tests
     runs-on: ubuntu-latest
@@ -36,4 +36,4 @@ jobs:
         with:
           disk-cache: ${{ github.workflow }}
           repository-cache: true
-      - run: bazel test //rust-reapi:smoke_test
+      - run: bazel test //rust-reapi:smoke_test --test_output=errors
