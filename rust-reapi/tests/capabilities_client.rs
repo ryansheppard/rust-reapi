@@ -21,7 +21,7 @@ async fn client_receives_advertised_capabilities() -> Result<(), Box<dyn std::er
         .ok_or("missing cache capabilities")?;
     assert_eq!(cache.digest_functions, vec![DigestFunction::Sha256 as i32]);
     assert!(
-        !cache
+        cache
             .action_cache_update_capabilities
             .ok_or("missing action cache capabilities")?
             .update_enabled

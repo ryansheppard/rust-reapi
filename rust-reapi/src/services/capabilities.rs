@@ -1,10 +1,8 @@
-use remote_execution_proto::build::bazel::{
-    remote::execution::v2::{
-        ActionCacheUpdateCapabilities, CacheCapabilities, ExecutionCapabilities,
-        GetCapabilitiesRequest, ServerCapabilities, capabilities_server::Capabilities,
-        digest_function::Value as DigestFunction,
-        symlink_absolute_path_strategy::Value as SymlinkAbsolutePathStrategy,
-    },
+use remote_execution_proto::build::bazel::remote::execution::v2::{
+    ActionCacheUpdateCapabilities, CacheCapabilities, ExecutionCapabilities,
+    GetCapabilitiesRequest, ServerCapabilities, capabilities_server::Capabilities,
+    digest_function::Value as DigestFunction,
+    symlink_absolute_path_strategy::Value as SymlinkAbsolutePathStrategy,
 };
 use semver_proto::build::bazel::semver::SemVer;
 use tonic::{Request, Response, Status};
@@ -34,9 +32,8 @@ impl Capabilities for CapabilitiesService {
         Ok(Response::new(ServerCapabilities {
             cache_capabilities: Some(CacheCapabilities {
                 digest_functions: vec![DigestFunction::Sha256 as i32],
-                // TODO: Add action cache
                 action_cache_update_capabilities: Some(ActionCacheUpdateCapabilities {
-                    update_enabled: false,
+                    update_enabled: true,
                 }),
                 cache_priority_capabilities: None,
                 max_batch_total_size_bytes: 0,

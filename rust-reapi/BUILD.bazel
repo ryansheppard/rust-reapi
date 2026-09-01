@@ -70,6 +70,44 @@ rust_test(
 )
 
 rust_test(
+    name = "action_cache_test",
+    size = "small",
+    srcs = [
+        "tests/action_cache_client.rs",
+        "tests/common/mod.rs",
+    ],
+    crate_root = "tests/action_cache_client.rs",
+    edition = crate_edition(),
+    deps = [
+        ":bytestream_proto",
+        ":remote_execution_rust",
+        ":rust_reapi_lib",
+    ] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)
+
+rust_test(
+    name = "capabilities_client_test",
+    size = "small",
+    srcs = [
+        "tests/capabilities_client.rs",
+        "tests/common/mod.rs",
+    ],
+    crate_root = "tests/capabilities_client.rs",
+    edition = crate_edition(),
+    deps = [
+        ":bytestream_proto",
+        ":remote_execution_rust",
+        ":rust_reapi_lib",
+    ] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)
+
+rust_test(
     name = "unit_test",
     size = "small",
     srcs = ["src/lib.rs"] + glob([
