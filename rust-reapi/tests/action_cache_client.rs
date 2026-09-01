@@ -2,7 +2,10 @@ use prost::Message;
 use remote_execution_proto::build::bazel::remote::execution::v2::{
     Action, ActionResult, Digest, GetActionResultRequest, OutputFile, UpdateActionResultRequest,
 };
-use rust_reapi::storage::{BlobKey, BlobStore, CacheKind};
+use rust_reapi::{
+    digest::DigestAlgorithm,
+    storage::{BlobKey, BlobStore, CacheKind},
+};
 use tonic::Request;
 
 mod common;
@@ -15,15 +18,15 @@ const COMMAND_HASH: &str = "command-hash";
 fn key(hash: &str, kind: CacheKind) -> BlobKey {
     BlobKey {
         instance: INSTANCE.to_string(),
-        algorithm: "sha256".to_string(),
+        algorithm: DigestAlgorithm::Sha256,
         hash: hash.to_string(),
         kind,
     }
 }
 
 #[tokio::test]
-async fn client_gets_a_cached_result_when_referenced_artifacts_exist(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn client_gets_a_cached_result_when_referenced_artifacts_exist()
+-> Result<(), Box<dyn std::error::Error>> {
     let (mut cache, store, server) = common::action_cache_client().await?;
     let expected = ActionResult {
         output_files: vec![OutputFile {
@@ -64,8 +67,8 @@ async fn client_gets_a_cached_result_when_referenced_artifacts_exist(
 }
 
 #[tokio::test]
-async fn client_updates_and_then_reads_an_action_result(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn client_updates_and_then_reads_an_action_result() -> Result<(), Box<dyn std::error::Error>>
+{
     let (mut cache, store, server) = common::action_cache_client().await?;
     let action_digest = Digest {
         hash: ACTION_HASH.to_string(),

@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::digest::DigestAlgorithm;
+
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error("storage unavailable: {0}")]
@@ -15,7 +17,7 @@ pub enum CacheKind {
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct BlobKey {
     pub instance: String,
-    pub algorithm: String,
+    pub algorithm: DigestAlgorithm,
     pub hash: String,
     pub kind: CacheKind,
 }

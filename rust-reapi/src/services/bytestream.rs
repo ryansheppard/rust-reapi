@@ -6,7 +6,10 @@ use bytestream_proto::google::bytestream::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::storage::{BlobKey, BlobStore, CacheKind};
+use crate::{
+    digest::DigestAlgorithm,
+    storage::{BlobKey, BlobStore, CacheKind},
+};
 
 const READ_CHUNK_SIZE: usize = 64 * 1024;
 
@@ -63,7 +66,7 @@ impl ByteStream for ByteStreamService {
 
         let parsed = parse_bytestream_resource_name(request.resource_name.as_str())
             .map_err(|err| Status::internal(err.to_string()))?;
-        let key = resolve_blob_key(parsed, &["sha256"])?;
+        let key = resolve_blob_key(parsed)?;
 
         let blob = self
             .store
@@ -135,7 +138,7 @@ impl ByteStream for ByteStreamService {
 
             if chunk.finish_write {
                 let resource_name = resource_name.expect("expected resource name");
-                let key = resolve_blob_key(resource_name, &["sha256"])?;
+                let key = resolve_blob_key(resource_name)?;
 
                 let committed_size = i64::try_from(accumulator.len())
                     .map_err(|_| Status::internal("blob exceeds exepected size"))?;
@@ -224,16 +227,12 @@ fn parse_bytestream_resource_name(
     })
 }
 
-fn resolve_blob_key(
-    resource: ParsedReadResource,
-    supported_algorithms: &[&str],
-) -> Result<BlobKey, Status> {
+fn resolve_blob_key(resource: ParsedReadResource) -> Result<BlobKey, Status> {
     let algorithm = match resource.algorithm {
-        Some(algorithm) if supported_algorithms.contains(&algorithm.as_str()) => algorithm,
-        Some(_) => return Err(Status::invalid_argument("unsupported digest function")),
-        // TODO: this is inferred, maybe not the right thing to do?
-        None => "sha256".to_string(),
-    };
+        Some(name) => name.parse::<DigestAlgorithm>(),
+        None => Ok(DigestAlgorithm::Sha256),
+    }
+    .map_err(Status::invalid_argument)?;
 
     Ok(BlobKey {
         instance: resource.instance,
@@ -274,16 +273,14 @@ mod tests {
 
     #[test]
     fn infers_sha256_for_bazel_style_resource_names() {
-        let parsed = parse_bytestream_resource_name(
-            "test/uploads/upload-123/blobs/abc123/12",
-        )
-        .expect("Bazel-style resource name should parse");
+        let parsed = parse_bytestream_resource_name("test/uploads/upload-123/blobs/abc123/12")
+            .expect("Bazel-style resource name should parse");
 
-        let key = resolve_blob_key(parsed, &["sha256"])
-            .expect("SHA-256 should be inferred for an omitted algorithm");
+        let key =
+            resolve_blob_key(parsed).expect("SHA-256 should be inferred for an omitted algorithm");
 
         assert_eq!(key.instance, "test");
-        assert_eq!(key.algorithm, "sha256");
+        assert_eq!(key.algorithm, DigestAlgorithm::Sha256);
         assert_eq!(key.hash, "abc123");
         assert_eq!(key.kind, CacheKind::ContentAddressableStorage);
     }
@@ -298,11 +295,11 @@ mod tests {
             compression: Compression::Identity,
             expected_size: 12,
         };
-        let actual = resolve_blob_key(parsed, &["sha256"]).unwrap();
+        let actual = resolve_blob_key(parsed).unwrap();
 
         let expected = BlobKey {
             instance: "test".to_string(),
-            algorithm: "sha256".to_string(),
+            algorithm: DigestAlgorithm::Sha256,
             hash: "abc123".to_string(),
             kind: CacheKind::ContentAddressableStorage,
         };

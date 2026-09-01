@@ -7,7 +7,10 @@ use remote_execution_proto::build::bazel::remote::execution::v2::{
 };
 use tonic::{Code, Request, Response, Status};
 
-use crate::storage::{BlobKey, BlobStore, CacheKind};
+use crate::{
+    digest::DigestAlgorithm,
+    storage::{BlobKey, BlobStore, CacheKind},
+};
 
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
@@ -20,10 +23,10 @@ impl ActionCacheService {
         Self { store }
     }
 
-    fn cas_key(instance: &str, digest: &Digest) -> BlobKey {
+    fn cas_key(instance: &str, algorithm: DigestAlgorithm, digest: &Digest) -> BlobKey {
         BlobKey {
             instance: instance.to_string(),
-            algorithm: "sha256".to_string(),
+            algorithm,
             hash: digest.hash.clone(),
             kind: CacheKind::ContentAddressableStorage,
         }
@@ -32,6 +35,7 @@ impl ActionCacheService {
     fn validate_action_result_artifacts(
         &self,
         instance: &str,
+        algorithm: DigestAlgorithm,
         action_result: &ActionResult,
         missing_code: Code,
     ) -> Result<(), Status> {
@@ -57,7 +61,7 @@ impl ActionCacheService {
             })?;
             let tree_bytes = self
                 .store
-                .get(&Self::cas_key(instance, tree_digest))
+                .get(&Self::cas_key(instance, algorithm, tree_digest))
                 .map_err(|err| Status::internal(err.to_string()))?
                 .ok_or_else(|| Status::new(missing_code, "output tree is missing from CAS"))?;
             let tree = Tree::decode(tree_bytes.as_slice())
@@ -69,13 +73,13 @@ impl ActionCacheService {
             // NOTE: bazel stores empty stdout or something
             if digest.size_bytes == 0 && digest.hash == EMPTY_SHA256 {
                 self.store
-                    .put(Self::cas_key(instance, &digest), Vec::new())
+                    .put(Self::cas_key(instance, algorithm, &digest), Vec::new())
                     .map_err(|err| Status::internal(err.to_string()))?;
                 continue;
             }
             if !self
                 .store
-                .contains(&Self::cas_key(instance, &digest))
+                .contains(&Self::cas_key(instance, algorithm, &digest))
                 .map_err(|err| Status::internal(err.to_string()))?
             {
                 return Err(Status::new(
@@ -104,9 +108,12 @@ impl ActionCache for ActionCacheService {
             .action_digest
             .ok_or_else(|| Status::invalid_argument("missing action_digest"))?;
 
+        let algorithm = DigestAlgorithm::resolve_proto_value(request.digest_function)
+            .map_err(Status::invalid_argument)?;
+
         let key = BlobKey {
             instance: request.instance_name.clone(),
-            algorithm: "sha256".to_string(),
+            algorithm,
             hash: action_digest.hash.clone(),
             kind: CacheKind::ActionCache,
         };
@@ -122,6 +129,7 @@ impl ActionCache for ActionCacheService {
 
         self.validate_action_result_artifacts(
             &request.instance_name,
+            algorithm,
             &action_result,
             Code::NotFound,
         )?;
@@ -143,9 +151,16 @@ impl ActionCache for ActionCacheService {
             .as_ref()
             .ok_or_else(|| Status::invalid_argument("missing action_result"))?;
 
+        let algorithm = DigestAlgorithm::resolve_proto_value(request.digest_function)
+            .map_err(Status::invalid_argument)?;
+
         let action_bytes = self
             .store
-            .get(&Self::cas_key(&request.instance_name, action_digest))
+            .get(&Self::cas_key(
+                &request.instance_name,
+                algorithm,
+                action_digest,
+            ))
             .map_err(|err| Status::internal(err.to_string()))?
             .ok_or_else(|| Status::failed_precondition("action is missing from CAS"))?;
         let action = Action::decode(action_bytes.as_slice())
@@ -156,7 +171,11 @@ impl ActionCache for ActionCacheService {
 
         if !self
             .store
-            .contains(&Self::cas_key(&request.instance_name, &command_digest))
+            .contains(&Self::cas_key(
+                &request.instance_name,
+                algorithm,
+                &command_digest,
+            ))
             .map_err(|err| Status::internal(err.to_string()))?
         {
             return Err(Status::failed_precondition("command is missing from CAS"));
@@ -164,13 +183,14 @@ impl ActionCache for ActionCacheService {
 
         self.validate_action_result_artifacts(
             &request.instance_name,
+            algorithm,
             action_result,
             Code::FailedPrecondition,
         )?;
 
         let action_key = BlobKey {
             instance: request.instance_name.clone(),
-            algorithm: "sha256".to_string(),
+            algorithm,
             hash: request.action_digest.expect("validated above").hash.clone(),
             kind: CacheKind::ActionCache,
         };
@@ -231,7 +251,7 @@ mod tests {
     fn key(hash: &str, kind: CacheKind) -> BlobKey {
         BlobKey {
             instance: INSTANCE.to_string(),
-            algorithm: "sha256".to_string(),
+            algorithm: DigestAlgorithm::Sha256,
             hash: hash.to_string(),
             kind,
         }

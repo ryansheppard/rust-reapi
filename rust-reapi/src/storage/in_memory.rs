@@ -42,7 +42,7 @@ impl BlobStore for InMemoryStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::CacheKind;
+    use crate::{digest::DigestAlgorithm, storage::CacheKind};
 
     use super::*;
 
@@ -51,7 +51,7 @@ mod tests {
         let in_memory = InMemoryStore::new();
         let test_key = BlobKey {
             instance: "test".to_string(),
-            algorithm: "sha256".to_string(),
+            algorithm: DigestAlgorithm::Sha256,
             hash: "123abc".to_string(),
             kind: CacheKind::ContentAddressableStorage,
         };
@@ -65,7 +65,7 @@ mod tests {
         let in_memory = InMemoryStore::new();
         let test_key = BlobKey {
             instance: "test".to_string(),
-            algorithm: "sha256".to_string(),
+            algorithm: DigestAlgorithm::Sha256,
             hash: "123abc".to_string(),
             kind: CacheKind::ContentAddressableStorage,
         };
@@ -81,7 +81,7 @@ mod tests {
         let in_memory = InMemoryStore::new();
         let test_key = BlobKey {
             instance: "test".to_string(),
-            algorithm: "sha256".to_string(),
+            algorithm: DigestAlgorithm::Sha256,
             hash: "123abc".to_string(),
             kind: CacheKind::ContentAddressableStorage,
         };

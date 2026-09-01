@@ -7,6 +7,8 @@ use remote_execution_proto::build::bazel::remote::execution::v2::{
 use semver_proto::build::bazel::semver::SemVer;
 use tonic::{Request, Response, Status};
 
+use crate::digest::DigestAlgorithm;
+
 const HIGH_REAPI_VERSION: SemVer = SemVer {
     major: 2,
     minor: 12,
@@ -38,7 +40,7 @@ impl Capabilities for CapabilitiesService {
     ) -> Result<Response<ServerCapabilities>, Status> {
         Ok(Response::new(ServerCapabilities {
             cache_capabilities: Some(CacheCapabilities {
-                digest_functions: vec![DigestFunction::Sha256 as i32],
+                digest_functions: DigestAlgorithm::supported_digest_functions(),
                 action_cache_update_capabilities: Some(ActionCacheUpdateCapabilities {
                     update_enabled: true,
                 }),

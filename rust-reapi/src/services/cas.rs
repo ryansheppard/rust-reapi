@@ -11,7 +11,10 @@ use remote_execution_proto::build::bazel::remote::execution::v2::{
 use status_proto::google::rpc::Status as RpcStatus;
 use tonic::{Request, Response, Status};
 
-use crate::storage::{BlobKey, BlobStore, CacheKind};
+use crate::{
+    digest::DigestAlgorithm,
+    storage::{BlobKey, BlobStore, CacheKind},
+};
 
 pub struct CasService {
     store: Arc<dyn BlobStore + Send + Sync>,
@@ -40,11 +43,13 @@ impl ContentAddressableStorage for CasService {
         let request = request.into_inner();
         let mut missing_blob_digests = Vec::new();
 
+        let algorithm = DigestAlgorithm::resolve_proto_value(request.digest_function)
+            .map_err(Status::invalid_argument)?;
+
         for digest in request.blob_digests {
             let key = BlobKey {
                 instance: request.instance_name.clone(),
-                // TODO: Handle/infer digest functions
-                algorithm: "sha256".to_string(),
+                algorithm,
                 hash: digest.hash.clone(),
                 kind: CacheKind::ContentAddressableStorage,
             };
@@ -77,10 +82,13 @@ impl ContentAddressableStorage for CasService {
             }
         }
 
+        let algorithm = DigestAlgorithm::resolve_proto_value(request.digest_function)
+            .map_err(Status::invalid_argument)?;
+
         for digest in request.digests {
             let key = BlobKey {
                 instance: request.instance_name.clone(),
-                algorithm: "sha256".to_string(),
+                algorithm,
                 hash: digest.hash.clone(),
                 kind: CacheKind::ContentAddressableStorage,
             };
@@ -135,6 +143,9 @@ impl ContentAddressableStorage for CasService {
         let request = request.into_inner();
         let mut responses = Vec::new();
 
+        let algorithm = DigestAlgorithm::resolve_proto_value(request.digest_function)
+            .map_err(Status::invalid_argument)?;
+
         for req in request.requests {
             let Some(digest) = req.digest else {
                 return Err(Status::invalid_argument("missing digest"));
@@ -147,7 +158,7 @@ impl ContentAddressableStorage for CasService {
 
             let key = BlobKey {
                 instance: request.instance_name.clone(),
-                algorithm: "sha256".to_string(),
+                algorithm,
                 hash: digest.hash.clone(),
                 kind: CacheKind::ContentAddressableStorage,
             };
