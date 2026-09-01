@@ -1,4 +1,3 @@
 target/
 
 /bazel-*
-!/bazel-smoke

@@ -1,0 +1,14 @@
+genrule(
+    name = "hello",
+    outs = ["hello.txt"],
+    cmd = "echo hello > $@",
+)
+
+filegroup(
+    name = "files",
+    srcs = glob(
+        ["**"],
+        exclude = ["BUILD.bazel"],
+    ),
+    visibility = ["//visibility:public"],
+)

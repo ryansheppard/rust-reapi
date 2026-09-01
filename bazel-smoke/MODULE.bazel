@@ -1,0 +1,4 @@
+module(
+    name = "reapi_smoke",
+    version = "0.0.1",
+)
