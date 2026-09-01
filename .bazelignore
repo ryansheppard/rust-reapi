@@ -1,1 +1,5 @@
 vendor
+bazel-smoke/bazel-bazel-smoke
+bazel-smoke/bazel-bin
+bazel-smoke/bazel-out
+bazel-smoke/bazel-testlogs

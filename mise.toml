@@ -1,3 +1,6 @@
 [tools]
 bazel = "9.2.0"
 rust = "1.98.0"
+
+[tasks.smoke_test]
+run = 'bazel test --test_env=PATH //rust-reapi:smoke_test'

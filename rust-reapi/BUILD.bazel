@@ -1,6 +1,7 @@
 load("@crates//:defs.bzl", "all_crate_deps", "crate_edition")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 load("@rules_rust_prost//:defs.bzl", "rust_prost_library")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 rust_prost_library(
     name = "remote_execution_rust",
@@ -125,4 +126,15 @@ rust_test(
         normal = True,
         normal_dev = True,
     ),
+)
+
+sh_test(
+    name = "smoke_test",
+    size = "small",
+    srcs = ["tests/smoke_test.sh"],
+    data = [
+        ":rust_reapi_cache",
+        "//bazel-smoke:files",
+    ],
+    tags = ["manual"],
 )

@@ -231,7 +231,8 @@ fn resolve_blob_key(
     let algorithm = match resource.algorithm {
         Some(algorithm) if supported_algorithms.contains(&algorithm.as_str()) => algorithm,
         Some(_) => return Err(Status::invalid_argument("unsupported digest function")),
-        None => return Err(Status::unimplemented("missing digest not yet implemented")),
+        // TODO: this is inferred, maybe not the right thing to do?
+        None => "sha256".to_string(),
     };
 
     Ok(BlobKey {
@@ -269,6 +270,22 @@ mod tests {
         let actual = parse_bytestream_resource_name(resource).unwrap();
 
         assert_eq!(actual.instance, "test");
+    }
+
+    #[test]
+    fn infers_sha256_for_bazel_style_resource_names() {
+        let parsed = parse_bytestream_resource_name(
+            "test/uploads/upload-123/blobs/abc123/12",
+        )
+        .expect("Bazel-style resource name should parse");
+
+        let key = resolve_blob_key(parsed, &["sha256"])
+            .expect("SHA-256 should be inferred for an omitted algorithm");
+
+        assert_eq!(key.instance, "test");
+        assert_eq!(key.algorithm, "sha256");
+        assert_eq!(key.hash, "abc123");
+        assert_eq!(key.kind, CacheKind::ContentAddressableStorage);
     }
 
     #[test]

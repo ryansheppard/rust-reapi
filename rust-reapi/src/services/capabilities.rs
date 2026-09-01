@@ -7,9 +7,16 @@ use remote_execution_proto::build::bazel::remote::execution::v2::{
 use semver_proto::build::bazel::semver::SemVer;
 use tonic::{Request, Response, Status};
 
-const REAPI_VERSION: SemVer = SemVer {
+const HIGH_REAPI_VERSION: SemVer = SemVer {
     major: 2,
     minor: 12,
+    patch: 0,
+    prerelease: String::new(),
+};
+
+const LOW_REAPI_VERSION: SemVer = SemVer {
+    major: 2,
+    minor: 0,
     patch: 0,
     prerelease: String::new(),
 };
@@ -56,8 +63,8 @@ impl Capabilities for CapabilitiesService {
                 digest_functions: vec![DigestFunction::Sha256 as i32],
             }),
             deprecated_api_version: None,
-            low_api_version: Some(REAPI_VERSION.clone()),
-            high_api_version: Some(REAPI_VERSION.clone()),
+            low_api_version: Some(LOW_REAPI_VERSION.clone()),
+            high_api_version: Some(HIGH_REAPI_VERSION.clone()),
         }))
     }
 }
@@ -89,6 +96,7 @@ mod tests {
             execution.digest_functions,
             vec![DigestFunction::Sha256 as i32]
         );
-        assert_eq!(response.low_api_version, response.high_api_version);
+        assert_eq!(response.low_api_version, Some(LOW_REAPI_VERSION));
+        assert_eq!(response.high_api_version, Some(HIGH_REAPI_VERSION));
     }
 }

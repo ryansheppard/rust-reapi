@@ -5,6 +5,7 @@ module(
 
 bazel_dep(name = "rules_rust", version = "0.73.0")
 bazel_dep(name = "rules_rust_prost", version = "0.73.0")
+bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "rules_proto", version = "7.1.0")
 
 # because of gRPC pinned in remote-apis
@@ -36,6 +37,7 @@ register_toolchains("//:prost_toolchain")
 
 bazel_dep(name = "bazel_remote_apis", version = "1.0.0")
 bazel_dep(name = "googleapis", version = "0.0.0-20260130-c0fcb356")
+
 local_path_override(
     module_name = "bazel_remote_apis",
     path = "vendor/remote-apis",

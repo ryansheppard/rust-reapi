@@ -9,6 +9,8 @@ use tonic::{Code, Request, Response, Status};
 
 use crate::storage::{BlobKey, BlobStore, CacheKind};
 
+const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
 pub struct ActionCacheService {
     store: Arc<dyn BlobStore + Send + Sync>,
 }
@@ -64,6 +66,13 @@ impl ActionCacheService {
         }
 
         for digest in digests {
+            // NOTE: bazel stores empty stdout or something
+            if digest.size_bytes == 0 && digest.hash == EMPTY_SHA256 {
+                self.store
+                    .put(Self::cas_key(instance, &digest), Vec::new())
+                    .map_err(|err| Status::internal(err.to_string()))?;
+                continue;
+            }
             if !self
                 .store
                 .contains(&Self::cas_key(instance, &digest))
@@ -71,7 +80,10 @@ impl ActionCacheService {
             {
                 return Err(Status::new(
                     missing_code,
-                    "referenced artifact is missing from CAS",
+                    format!(
+                        "referenced artifact is missing from CAS: {}/{}",
+                        digest.hash, digest.size_bytes
+                    ),
                 ));
             }
         }

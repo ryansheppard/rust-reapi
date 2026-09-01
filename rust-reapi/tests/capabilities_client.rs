@@ -50,9 +50,16 @@ async fn client_receives_advertised_capabilities() -> Result<(), Box<dyn std::er
             low_api_version.minor,
             low_api_version.patch
         ),
+        (2, 0, 0)
+    );
+    assert_eq!(
+        (
+            high_api_version.major,
+            high_api_version.minor,
+            high_api_version.patch
+        ),
         (2, 12, 0)
     );
-    assert_eq!(low_api_version, high_api_version);
 
     server.abort();
     Ok(())
