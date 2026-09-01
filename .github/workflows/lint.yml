@@ -1,0 +1,24 @@
+name: ci
+on: [pull_request]
+jobs:
+  lint:
+    name: Run linting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@7
+      - uses: jdx/mise-action@v4
+      - run: hk check --all
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@7
+      - uses: jdx/mise-action@v4
+      - run: bazel test //...
+  smoke_test:
+    name: Run smoke tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@7
+      - uses: jdx/mise-action@v4
+      - run: bazel test //rust-reapi:smoke_test

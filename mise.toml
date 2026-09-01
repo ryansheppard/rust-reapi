@@ -1,4 +1,5 @@
 [tools]
+act = "0.2.89"
 bazel = "9.2.0"
 buildifier = "8.5.1"
 hk = "1.57.0"
