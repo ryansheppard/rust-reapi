@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use prost::Message;
 use remote_execution_proto::build::bazel::remote::execution::v2::{
-    ActionResult, Digest, GetActionResultRequest, Tree, UpdateActionResultRequest,
+    Action, ActionResult, Digest, GetActionResultRequest, Tree, UpdateActionResultRequest,
     action_cache_server::ActionCache,
 };
-use tonic::{Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
 
 use crate::storage::{BlobKey, BlobStore, CacheKind};
 
@@ -16,6 +16,67 @@ pub struct ActionCacheService {
 impl ActionCacheService {
     pub fn new(store: Arc<dyn BlobStore + Send + Sync>) -> Self {
         Self { store }
+    }
+
+    fn cas_key(instance: &str, digest: &Digest) -> BlobKey {
+        BlobKey {
+            instance: instance.to_string(),
+            algorithm: "sha256".to_string(),
+            hash: digest.hash.clone(),
+            kind: CacheKind::ContentAddressableStorage,
+        }
+    }
+
+    fn validate_action_result_artifacts(
+        &self,
+        instance: &str,
+        action_result: &ActionResult,
+        missing_code: Code,
+    ) -> Result<(), Status> {
+        let mut digests = Vec::new();
+
+        for output_file in &action_result.output_files {
+            let digest = output_file
+                .digest
+                .as_ref()
+                .ok_or_else(|| Status::new(missing_code, "output file is missing its digest"))?;
+            digests.push(digest.clone());
+        }
+        if let Some(stdout) = &action_result.stdout_digest {
+            digests.push(stdout.clone());
+        }
+        if let Some(stderr) = &action_result.stderr_digest {
+            digests.push(stderr.clone());
+        }
+
+        for output_directory in &action_result.output_directories {
+            let tree_digest = output_directory.tree_digest.as_ref().ok_or_else(|| {
+                Status::new(missing_code, "output directory is missing its tree digest")
+            })?;
+            let tree_bytes = self
+                .store
+                .get(&Self::cas_key(instance, tree_digest))
+                .map_err(|err| Status::internal(err.to_string()))?
+                .ok_or_else(|| Status::new(missing_code, "output tree is missing from CAS"))?;
+            let tree = Tree::decode(tree_bytes.as_slice())
+                .map_err(|err| Status::internal(format!("invalid output tree: {err}")))?;
+            collect_tree_file_digests(tree, &mut digests, missing_code)?;
+        }
+
+        for digest in digests {
+            if !self
+                .store
+                .contains(&Self::cas_key(instance, &digest))
+                .map_err(|err| Status::internal(err.to_string()))?
+            {
+                return Err(Status::new(
+                    missing_code,
+                    "referenced artifact is missing from CAS",
+                ));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -47,62 +108,11 @@ impl ActionCache for ActionCacheService {
         let action_result = ActionResult::decode(bytes.as_slice())
             .map_err(|err| Status::internal(format!("invalid cached ActionResult: {err}")))?;
 
-        let mut digests: Vec<Digest> = Vec::new();
-
-        for output_file in &action_result.output_files {
-            let digest = output_file
-                .digest
-                .as_ref()
-                .ok_or_else(|| Status::not_found("action result not cached"))?;
-
-            digests.push(digest.clone());
-        }
-
-        if let Some(stdout) = &action_result.stdout_digest {
-            digests.push(stdout.clone());
-        }
-        if let Some(stderr) = &action_result.stderr_digest {
-            digests.push(stderr.clone());
-        }
-
-        for dir in &action_result.output_directories {
-            let digest = dir
-                .tree_digest
-                .as_ref()
-                .ok_or_else(|| Status::not_found("digest not found"))?;
-
-            let cas_key = BlobKey {
-                instance: request.instance_name.clone(),
-                algorithm: "sha256".to_string(),
-                hash: digest.hash.clone(),
-                kind: CacheKind::ContentAddressableStorage,
-            };
-
-            let tree = self
-                .store
-                .get(&cas_key)
-                .map_err(|err| Status::internal(err.to_string()))?
-                .ok_or_else(|| Status::not_found("action result not cached"))?;
-            let tree = Tree::decode(tree.as_slice())
-                .map_err(|err| Status::internal(format!("invalid cached tree: {err}")))?;
-            collect_tree_file_digests(tree, &mut digests)?;
-        }
-
-        for digest in digests {
-            let key = BlobKey {
-                instance: request.instance_name.clone(),
-                algorithm: "sha256".to_string(),
-                hash: digest.hash.clone(),
-                kind: CacheKind::ContentAddressableStorage,
-            };
-            if !self
-                .store
-                .contains(&key)
-                .map_err(|err| Status::internal(err.to_string()))?
-            {
-                return Err(Status::not_found("action result not cached"));
-            }
-        }
+        self.validate_action_result_artifacts(
+            &request.instance_name,
+            &action_result,
+            Code::NotFound,
+        )?;
 
         Ok(Response::new(action_result))
     }
@@ -112,32 +122,63 @@ impl ActionCache for ActionCacheService {
         request: Request<UpdateActionResultRequest>,
     ) -> Result<Response<ActionResult>, Status> {
         let request = request.into_inner();
-        // blob key
-        // contains?
-        // store
-        // return
+        let action_digest = request
+            .action_digest
+            .ok_or_else(|| Status::invalid_argument("missing action_digest"))?;
+        let action_result = request
+            .action_result
+            .ok_or_else(|| Status::invalid_argument("missing action_result"))?;
+
+        let action_bytes = self
+            .store
+            .get(&Self::cas_key(&request.instance_name, &action_digest))
+            .map_err(|err| Status::internal(err.to_string()))?
+            .ok_or_else(|| Status::failed_precondition("action is missing from CAS"))?;
+        let action = Action::decode(action_bytes.as_slice())
+            .map_err(|err| Status::failed_precondition(format!("invalid Action in CAS: {err}")))?;
+        let command_digest = action
+            .command_digest
+            .ok_or_else(|| Status::failed_precondition("Action has no command_digest"))?;
+
+        if !self
+            .store
+            .contains(&Self::cas_key(&request.instance_name, &command_digest))
+            .map_err(|err| Status::internal(err.to_string()))?
+        {
+            return Err(Status::failed_precondition("command is missing from CAS"));
+        }
+
+        self.validate_action_result_artifacts(
+            &request.instance_name,
+            &action_result,
+            Code::FailedPrecondition,
+        )?;
+
         Err(Status::unimplemented("not implemented yet"))
     }
 }
 
-fn collect_tree_file_digests(tree: Tree, digests: &mut Vec<Digest>) -> Result<(), Status> {
+fn collect_tree_file_digests(
+    tree: Tree,
+    digests: &mut Vec<Digest>,
+    missing_code: Code,
+) -> Result<(), Status> {
     let root = tree
         .root
         .as_ref()
-        .ok_or_else(|| Status::not_found("cached tree has no root"))?;
+        .ok_or_else(|| Status::new(missing_code, "output tree has no root"))?;
     for file in &root.files {
         let digest = file
             .digest
             .as_ref()
-            .ok_or_else(|| Status::not_found("file not found"))?;
+            .ok_or_else(|| Status::new(missing_code, "output tree file is missing its digest"))?;
         digests.push(digest.clone());
     }
     for child in tree.children {
         for file in child.files {
-            let digest = file
-                .digest
-                .as_ref()
-                .ok_or_else(|| Status::not_found("file not found"))?;
+            let digest = file.digest.as_ref().ok_or_else(|| {
+                Status::new(missing_code, "output tree file is missing its digest")
+            })?;
             digests.push(digest.clone());
         }
     }
