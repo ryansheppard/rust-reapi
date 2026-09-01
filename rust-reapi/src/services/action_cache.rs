@@ -124,14 +124,16 @@ impl ActionCache for ActionCacheService {
         let request = request.into_inner();
         let action_digest = request
             .action_digest
+            .as_ref()
             .ok_or_else(|| Status::invalid_argument("missing action_digest"))?;
         let action_result = request
             .action_result
+            .as_ref()
             .ok_or_else(|| Status::invalid_argument("missing action_result"))?;
 
         let action_bytes = self
             .store
-            .get(&Self::cas_key(&request.instance_name, &action_digest))
+            .get(&Self::cas_key(&request.instance_name, action_digest))
             .map_err(|err| Status::internal(err.to_string()))?
             .ok_or_else(|| Status::failed_precondition("action is missing from CAS"))?;
         let action = Action::decode(action_bytes.as_slice())
@@ -150,11 +152,25 @@ impl ActionCache for ActionCacheService {
 
         self.validate_action_result_artifacts(
             &request.instance_name,
-            &action_result,
+            action_result,
             Code::FailedPrecondition,
         )?;
 
-        Err(Status::unimplemented("not implemented yet"))
+        let action_key = BlobKey {
+            instance: request.instance_name.clone(),
+            algorithm: "sha256".to_string(),
+            hash: request.action_digest.expect("validated above").hash.clone(),
+            kind: CacheKind::ActionCache,
+        };
+
+        let action_result = &request
+            .action_result
+            .ok_or_else(|| Status::invalid_argument("missing action result"))?;
+        self.store
+            .put(action_key, action_result.encode_to_vec())
+            .map_err(|err| Status::internal(err.to_string()))?;
+
+        Ok(Response::new(action_result.clone()))
     }
 }
 
