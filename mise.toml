@@ -1,12 +1,8 @@
 [tools]
 bazel = "9.2.0"
+buildifier = "8.5.1"
+hk = "1.57.0"
 rust = "1.98.0"
 
 [tasks.smoke_test]
 run = 'bazel test --test_env=PATH //rust-reapi:smoke_test'
-
-[tasks.lint]
-run = '''
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo fmt --all --check
-'''
