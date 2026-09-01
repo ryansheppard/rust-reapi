@@ -72,7 +72,9 @@ pub async fn action_cache_client() -> Result<
 
     let server = tokio::spawn(async move {
         Server::builder()
-            .add_service(ActionCacheServer::new(ActionCacheService::new(service_store)))
+            .add_service(ActionCacheServer::new(ActionCacheService::new(
+                service_store,
+            )))
             .serve_with_incoming(TcpListenerStream::new(listener))
             .await
             .unwrap_or_else(|error| panic!("test server failed: {error}"));

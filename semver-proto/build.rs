@@ -11,7 +11,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tonic_prost_build::configure()
         .include_file("_protos.rs")
-        .compile_protos(&protos, &[remote_apis, protoc_bin_vendored::include_path()?])?;
+        .compile_protos(
+            &protos,
+            &[remote_apis, protoc_bin_vendored::include_path()?],
+        )?;
 
     println!("cargo:rerun-if-changed=../vendor/remote-apis/");
     Ok(())
