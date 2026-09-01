@@ -36,4 +36,4 @@ jobs:
         with:
           disk-cache: ${{ github.workflow }}
           repository-cache: true
-      - run: bazel test //rust-reapi:smoke_test --test_output=errors
+      - run: bazel test --test_env=PATH --test_output=errors //rust-reapi:smoke_test
