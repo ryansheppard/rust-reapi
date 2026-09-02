@@ -4,6 +4,7 @@ use remote_execution_proto::build::bazel::remote::execution::v2::{
     batch_update_blobs_request::Request as BlobRequest, compressor::Value as Compressor,
     digest_function::Value as DigestFunction,
 };
+use rust_reapi::storage::MAX_DECOMPRESSED_BLOB_SIZE;
 use tonic::{Code, Request};
 
 mod common;
@@ -264,6 +265,37 @@ async fn compressed_batch_update_rejects_uncompressed_size_mismatch()
 }
 
 #[tokio::test]
+async fn compressed_batch_update_rejects_declared_size_above_server_limit()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (mut cas, server) = common::cas_client().await?;
+
+    let response = cas
+        .batch_update_blobs(Request::new(BatchUpdateBlobsRequest {
+            instance_name: "test".to_string(),
+            requests: vec![BlobRequest {
+                digest: Some(Digest {
+                    hash: TEST_HASH.into(),
+                    size_bytes: (MAX_DECOMPRESSED_BLOB_SIZE + 1) as i64,
+                }),
+                data: b"not a zstd frame".to_vec(),
+                compressor: Compressor::Zstd as i32,
+            }],
+            digest_function: DigestFunction::Sha256 as i32,
+        }))
+        .await?
+        .into_inner();
+
+    let status = response.responses[0]
+        .status
+        .as_ref()
+        .expect("batch response should contain a status");
+    assert_eq!(status.code, Code::InvalidArgument as i32);
+    assert!(status.message.contains("exceeds limit"));
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
 async fn client_can_read_a_compressed_bytestream_suffix() -> Result<(), Box<dyn std::error::Error>>
 {
     let (mut cas, mut bytestream, server) = common::cache_clients().await?;
@@ -309,6 +341,30 @@ async fn client_can_read_a_compressed_bytestream_suffix() -> Result<(), Box<dyn 
         .expect_err("compressed reads with a limit should fail");
     assert_eq!(error.code(), Code::InvalidArgument);
 
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn compressed_bytestream_write_rejects_declared_size_above_server_limit()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_cas, mut bytestream, server) = common::cache_clients().await?;
+
+    let error = bytestream
+        .write(Request::new(tokio_stream::iter([WriteRequest {
+            resource_name: format!(
+                "test/uploads/upload-123/compressed-blobs/zstd/sha256/{TEST_HASH}/{}",
+                MAX_DECOMPRESSED_BLOB_SIZE + 1
+            ),
+            write_offset: 0,
+            finish_write: true,
+            data: b"not a zstd frame".to_vec(),
+        }])))
+        .await
+        .expect_err("an oversized declared decompressed size should fail");
+
+    assert_eq!(error.code(), Code::InvalidArgument);
+    assert!(error.message().contains("exceeds limit"));
     server.abort();
     Ok(())
 }

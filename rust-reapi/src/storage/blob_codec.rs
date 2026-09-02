@@ -1,6 +1,9 @@
 use crate::storage::blob_store::{StorageEncoding, StoredBlob};
 use thiserror::Error;
 
+/// Maximum uncompressed size accepted by the in-process blob codec (100 MiB).
+pub const MAX_DECOMPRESSED_BLOB_SIZE: u64 = 100 * 1024 * 1024;
+
 #[derive(Debug, Error)]
 pub enum CompressionError {
     #[error("unsupported compression method")]
@@ -11,6 +14,9 @@ pub enum CompressionError {
 
     #[error("size mismatch, expected: {0}, actual: {1}")]
     SizeMismatch(u64, u64),
+
+    #[error("decompressed size {actual} exceeds limit of {limit} bytes")]
+    DecompressedSizeLimitExceeded { actual: u64, limit: u64 },
 }
 
 pub struct BlobCodec;
@@ -34,6 +40,13 @@ impl BlobCodec {
         mut blob: StoredBlob,
         target: StorageEncoding,
     ) -> Result<StoredBlob, CompressionError> {
+        if blob.metadata.uncompressed_size > MAX_DECOMPRESSED_BLOB_SIZE {
+            return Err(CompressionError::DecompressedSizeLimitExceeded {
+                actual: blob.metadata.uncompressed_size,
+                limit: MAX_DECOMPRESSED_BLOB_SIZE,
+            });
+        }
+
         if blob.metadata.encoding == target {
             return Ok(blob);
         }
@@ -147,6 +160,23 @@ mod tests {
             Err(CompressionError::SizeMismatch(3, 4))
         ));
         Ok(())
+    }
+
+    #[test]
+    fn decompression_rejects_declared_size_above_limit_before_decoding() {
+        let blob = StoredBlob::encoded(
+            b"not a zstd frame".to_vec(),
+            StorageEncoding::Zstd,
+            MAX_DECOMPRESSED_BLOB_SIZE + 1,
+        );
+
+        assert!(matches!(
+            BlobCodec::into_identity_data(blob),
+            Err(CompressionError::DecompressedSizeLimitExceeded {
+                actual,
+                limit: MAX_DECOMPRESSED_BLOB_SIZE,
+            }) if actual == MAX_DECOMPRESSED_BLOB_SIZE + 1
+        ));
     }
 
     #[test]
