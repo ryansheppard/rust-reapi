@@ -8,10 +8,11 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     digest::DigestAlgorithm,
-    storage::{BlobKey, BlobStore, CacheKind},
+    storage::{BlobCodec, BlobKey, BlobStore, CacheKind, StorageEncoding, StoredBlob},
 };
 
 const READ_CHUNK_SIZE: usize = 64 * 1024;
+const STORAGE_ENCODING: StorageEncoding = StorageEncoding::Zstd;
 
 #[derive(Debug, thiserror::Error)]
 enum ParseResourceError {
@@ -20,12 +21,27 @@ enum ParseResourceError {
 
     #[error("resource size is invalid")]
     InvalidSize(#[from] ParseIntError),
+
+    #[error("resource size must not be negative")]
+    NegativeSize,
 }
 
 #[derive(Debug, PartialEq)]
 enum Compression {
     Identity,
     Named(String),
+}
+
+impl Compression {
+    fn storage_encoding(&self) -> Result<StorageEncoding, Status> {
+        match self {
+            Self::Identity => Ok(StorageEncoding::Identity),
+            Self::Named(name) if name == "zstd" => Ok(StorageEncoding::Zstd),
+            Self::Named(name) => Err(Status::unimplemented(format!(
+                "unsupported compression method: {name}"
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -65,31 +81,59 @@ impl ByteStream for ByteStreamService {
         let request = request.into_inner();
 
         let parsed = parse_bytestream_resource_name(request.resource_name.as_str())
-            .map_err(|err| Status::internal(err.to_string()))?;
-        let key = resolve_blob_key(parsed)?;
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        if parsed.upload_id.is_some() {
+            return Err(Status::invalid_argument(
+                "read resource name must not contain an upload id",
+            ));
+        }
+        let response_encoding = parsed.compression.storage_encoding()?;
+        if response_encoding != StorageEncoding::Identity && request.read_limit != 0 {
+            return Err(Status::invalid_argument(
+                "read_limit is not supported for compressed reads",
+            ));
+        }
+        let key = resolve_blob_key(&parsed)?;
 
         let blob = self
             .store
             .get(&key)
             .map_err(|err| Status::internal(err.to_string()))?
             .ok_or_else(|| Status::not_found("blob not found"))?;
+        if blob.metadata().uncompressed_size()
+            != u64::try_from(parsed.expected_size)
+                .map_err(|_| Status::invalid_argument("resource size must not be negative"))?
+        {
+            return Err(Status::not_found("blob size does not match resource name"));
+        }
+        let identity = BlobCodec::into_identity_data(blob)
+            .map_err(|err| Status::internal(format!("failed to decompress blob: {err}")))?;
+        key.algorithm
+            .validate(&parsed.hash, parsed.expected_size, &identity)
+            .map_err(|err| Status::internal(format!("stored blob failed validation: {err}")))?;
 
         let offset = usize::try_from(request.read_offset)
-            .map_err(|_| Status::invalid_argument("negative read offset"))?;
-
-        if offset > blob.len() {
+            .map_err(|_| Status::out_of_range("negative read offset"))?;
+        if offset > identity.len() {
             return Err(Status::out_of_range("read offset larger than blob size"));
         }
 
-        let available = &blob[offset..];
-        let limit = match request.read_limit {
-            0 => available.len(),
-            limit => usize::try_from(limit)
-                .map_err(|_| Status::invalid_argument("negative read limit"))?
-                .min(available.len()),
+        let available = identity[offset..].to_vec();
+        let data = if response_encoding == StorageEncoding::Identity {
+            let limit = match request.read_limit {
+                0 => available.len(),
+                limit => usize::try_from(limit)
+                    .map_err(|_| Status::invalid_argument("negative read limit"))?
+                    .min(available.len()),
+            };
+            available[..limit].to_vec()
+        } else {
+            BlobCodec::from_identity_data(available, response_encoding)
+                .map_err(|err| Status::internal(format!("failed to compress blob: {err}")))?
+                .into_data()
         };
 
-        let responses = available[..limit]
+        let responses = data
             .chunks(READ_CHUNK_SIZE)
             .map(|chunk| {
                 Ok(ReadResponse {
@@ -111,14 +155,15 @@ impl ByteStream for ByteStreamService {
 
         let mut accumulator: Vec<u8> = Vec::new();
         let mut resource_name = None;
+        let mut parsed_resource = None;
 
         while let Some(chunk) = requests.message().await? {
             if chunk.write_offset != accumulator.len() as i64 {
                 return Err(Status::invalid_argument("unexpected write offset"));
             }
 
-            if resource_name.is_some() {
-                if !chunk.resource_name.is_empty() {
+            if let Some(expected_name) = &resource_name {
+                if !chunk.resource_name.is_empty() && chunk.resource_name != *expected_name {
                     return Err(Status::invalid_argument("unexpected chunk name"));
                 }
             } else {
@@ -128,23 +173,44 @@ impl ByteStream for ByteStreamService {
                     ));
                 }
 
-                resource_name = Some(
-                    parse_bytestream_resource_name(chunk.resource_name.as_str())
-                        .map_err(|err| Status::invalid_argument(err.to_string()))?,
-                );
+                let parsed = parse_bytestream_resource_name(chunk.resource_name.as_str())
+                    .map_err(|err| Status::invalid_argument(err.to_string()))?;
+                if parsed.upload_id.is_none() {
+                    return Err(Status::invalid_argument(
+                        "write resource name must contain an upload id",
+                    ));
+                }
+                resource_name = Some(chunk.resource_name.clone());
+                parsed_resource = Some(parsed);
             }
 
             accumulator.extend_from_slice(&chunk.data);
 
             if chunk.finish_write {
-                let resource_name = resource_name.expect("expected resource name");
-                let key = resolve_blob_key(resource_name)?;
+                let parsed = parsed_resource
+                    .as_ref()
+                    .ok_or_else(|| Status::invalid_argument("missing resource name"))?;
+                let key = resolve_blob_key(parsed)?;
+                let incoming_encoding = parsed.compression.storage_encoding()?;
+                let expected_size = u64::try_from(parsed.expected_size)
+                    .map_err(|_| Status::invalid_argument("resource size must not be negative"))?;
+                let incoming = StoredBlob::encoded(accumulator, incoming_encoding, expected_size);
+                let committed_size = i64::try_from(incoming.metadata().stored_size())
+                    .map_err(|_| Status::internal("blob exceeds expected size"))?;
+                let identity = BlobCodec::into_identity_data(incoming).map_err(|err| {
+                    Status::invalid_argument(format!("invalid compressed blob: {err}"))
+                })?;
+                key.algorithm
+                    .validate(&parsed.hash, parsed.expected_size, &identity)
+                    .map_err(|err| Status::invalid_argument(err.to_string()))?;
 
-                let committed_size = i64::try_from(accumulator.len())
-                    .map_err(|_| Status::internal("blob exceeds exepected size"))?;
+                let stored =
+                    BlobCodec::from_identity_data(identity, STORAGE_ENCODING).map_err(|err| {
+                        Status::internal(format!("failed to encode blob for storage: {err}"))
+                    })?;
 
                 self.store
-                    .put(key, accumulator)
+                    .put(key, stored)
                     .map_err(|err| Status::internal(err.to_string()))?;
                 return Ok(Response::new(WriteResponse { committed_size }));
             }
@@ -207,37 +273,49 @@ fn parse_bytestream_resource_name(
         _ => unreachable!("marker was checked above"),
     };
 
-    let (algorithm, hash, size) = match digest_parts {
-        [hash, size] => (None, *hash, *size),
-        [algorithm, hash, size] => (Some((*algorithm).to_owned()), *hash, *size),
-        _ => return Err(ParseResourceError::InvalidShape),
-    };
+    let (algorithm, hash, size) =
+        if digest_parts.len() >= 3 && digest_parts[0].parse::<DigestAlgorithm>().is_ok() {
+            (
+                Some(digest_parts[0].to_owned()),
+                digest_parts[1],
+                digest_parts[2],
+            )
+        } else if digest_parts.len() >= 2 {
+            (None, digest_parts[0], digest_parts[1])
+        } else {
+            return Err(ParseResourceError::InvalidShape);
+        };
 
     if hash.is_empty() {
         return Err(ParseResourceError::InvalidShape);
     }
 
+    let expected_size = size.parse()?;
+    if expected_size < 0 {
+        return Err(ParseResourceError::NegativeSize);
+    }
+
     Ok(ParsedReadResource {
         instance,
         upload_id,
-        algorithm: algorithm.to_owned(),
+        algorithm,
         hash: hash.to_owned(),
         compression,
-        expected_size: size.parse()?,
+        expected_size,
     })
 }
 
-fn resolve_blob_key(resource: ParsedReadResource) -> Result<BlobKey, Status> {
-    let algorithm = match resource.algorithm {
+fn resolve_blob_key(resource: &ParsedReadResource) -> Result<BlobKey, Status> {
+    let algorithm = match &resource.algorithm {
         Some(name) => name.parse::<DigestAlgorithm>(),
         None => Ok(DigestAlgorithm::Sha256),
     }
     .map_err(Status::invalid_argument)?;
 
     Ok(BlobKey {
-        instance: resource.instance,
+        instance: resource.instance.clone(),
         algorithm,
-        hash: resource.hash,
+        hash: resource.hash.clone(),
         kind: CacheKind::ContentAddressableStorage,
     })
 }
@@ -277,7 +355,7 @@ mod tests {
             .expect("Bazel-style resource name should parse");
 
         let key =
-            resolve_blob_key(parsed).expect("SHA-256 should be inferred for an omitted algorithm");
+            resolve_blob_key(&parsed).expect("SHA-256 should be inferred for an omitted algorithm");
 
         assert_eq!(key.instance, "test");
         assert_eq!(key.algorithm, DigestAlgorithm::Sha256);
@@ -295,7 +373,7 @@ mod tests {
             compression: Compression::Identity,
             expected_size: 12,
         };
-        let actual = resolve_blob_key(parsed).unwrap();
+        let actual = resolve_blob_key(&parsed).unwrap();
 
         let expected = BlobKey {
             instance: "test".to_string(),

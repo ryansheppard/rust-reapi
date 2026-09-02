@@ -4,7 +4,7 @@ use remote_execution_proto::build::bazel::remote::execution::v2::{
 };
 use rust_reapi::{
     digest::DigestAlgorithm,
-    storage::{BlobKey, BlobStore, CacheKind},
+    storage::{BlobCodec, BlobKey, BlobStore, CacheKind, StorageEncoding},
 };
 use tonic::Request;
 
@@ -42,11 +42,11 @@ async fn client_gets_a_cached_result_when_referenced_artifacts_exist()
 
     store.put(
         key(ACTION_HASH, CacheKind::ActionCache),
-        expected.encode_to_vec(),
+        expected.encode_to_vec().into(),
     )?;
     store.put(
         key(OUTPUT_HASH, CacheKind::ContentAddressableStorage),
-        b"out".to_vec(),
+        b"out".to_vec().into(),
     )?;
 
     let actual = cache
@@ -90,21 +90,25 @@ async fn client_updates_and_then_reads_an_action_result() -> Result<(), Box<dyn 
         ..Default::default()
     };
 
-    store.put(
-        key(ACTION_HASH, CacheKind::ContentAddressableStorage),
+    let action_blob = BlobCodec::from_identity_data(
         Action {
             command_digest: Some(command_digest.clone()),
             ..Default::default()
         }
         .encode_to_vec(),
+        StorageEncoding::Zstd,
+    )?;
+    store.put(
+        key(ACTION_HASH, CacheKind::ContentAddressableStorage),
+        action_blob,
     )?;
     store.put(
         key(COMMAND_HASH, CacheKind::ContentAddressableStorage),
-        b"command".to_vec(),
+        b"command".to_vec().into(),
     )?;
     store.put(
         key(OUTPUT_HASH, CacheKind::ContentAddressableStorage),
-        b"out".to_vec(),
+        b"out".to_vec().into(),
     )?;
 
     let updated = cache
@@ -117,6 +121,10 @@ async fn client_updates_and_then_reads_an_action_result() -> Result<(), Box<dyn 
         .await?
         .into_inner();
     assert_eq!(updated, expected);
+    let stored_result = store
+        .get(&key(ACTION_HASH, CacheKind::ActionCache))?
+        .ok_or("missing stored action result")?;
+    assert_eq!(stored_result.metadata().encoding(), StorageEncoding::Zstd);
 
     let fetched = cache
         .get_action_result(Request::new(GetActionResultRequest {

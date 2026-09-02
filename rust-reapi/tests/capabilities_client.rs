@@ -1,5 +1,6 @@
 use remote_execution_proto::build::bazel::remote::execution::v2::{
-    GetCapabilitiesRequest, digest_function::Value as DigestFunction,
+    GetCapabilitiesRequest, compressor::Value as Compressor,
+    digest_function::Value as DigestFunction,
 };
 use tonic::Request;
 
@@ -26,8 +27,11 @@ async fn client_receives_advertised_capabilities() -> Result<(), Box<dyn std::er
             .ok_or("missing action cache capabilities")?
             .update_enabled
     );
-    assert!(cache.supported_compressors.is_empty());
-    assert!(cache.supported_batch_update_compressors.is_empty());
+    assert_eq!(cache.supported_compressors, vec![Compressor::Zstd as i32]);
+    assert_eq!(
+        cache.supported_batch_update_compressors,
+        vec![Compressor::Zstd as i32]
+    );
     assert!(!cache.split_blob_support);
     assert!(!cache.splice_blob_support);
 

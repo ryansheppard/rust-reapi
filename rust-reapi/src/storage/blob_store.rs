@@ -48,43 +48,65 @@ impl StorageEncoding {
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct StoredBlobMetadata {
-    pub encoding: StorageEncoding,
-    pub uncompressed_size: u64,
-    pub stored_size: u64,
+    pub(crate) encoding: StorageEncoding,
+    pub(crate) uncompressed_size: u64,
+    pub(crate) stored_size: u64,
+}
+
+impl StoredBlobMetadata {
+    pub fn encoding(&self) -> StorageEncoding {
+        self.encoding
+    }
+
+    pub fn uncompressed_size(&self) -> u64 {
+        self.uncompressed_size
+    }
+
+    pub fn stored_size(&self) -> u64 {
+        self.stored_size
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct StoredBlob {
-    pub data: Vec<u8>,
-    pub metadata: StoredBlobMetadata,
+    pub(crate) data: Vec<u8>,
+    pub(crate) metadata: StoredBlobMetadata,
 }
 
 impl StoredBlob {
     pub fn identity(data: Vec<u8>) -> Self {
         let size = data.len() as u64;
+        Self::encoded(data, StorageEncoding::Identity, size)
+    }
 
+    pub fn encoded(data: Vec<u8>, encoding: StorageEncoding, uncompressed_size: u64) -> Self {
+        let stored_size = data.len() as u64;
         Self {
             data,
             metadata: StoredBlobMetadata {
-                encoding: StorageEncoding::Identity,
-                uncompressed_size: size,
-                stored_size: size,
+                encoding,
+                uncompressed_size,
+                stored_size,
             },
         }
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn into_data(self) -> Vec<u8> {
+        self.data
+    }
+
+    pub fn metadata(&self) -> &StoredBlobMetadata {
+        &self.metadata
     }
 }
 
 impl From<Vec<u8>> for StoredBlob {
     fn from(data: Vec<u8>) -> Self {
-        let size = data.len() as u64;
-        Self {
-            data,
-            metadata: StoredBlobMetadata {
-                encoding: StorageEncoding::Identity,
-                uncompressed_size: size,
-                stored_size: size,
-            },
-        }
+        Self::identity(data)
     }
 }
 

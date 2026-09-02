@@ -42,10 +42,7 @@ impl BlobStore for InMemoryStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        digest::DigestAlgorithm,
-        storage::{CacheKind, blob_store::StorageEncoding},
-    };
+    use crate::{digest::DigestAlgorithm, storage::CacheKind};
 
     use super::*;
 
@@ -90,29 +87,18 @@ mod tests {
         };
 
         in_memory
-            .put(
-                test_key.clone(),
-                StoredBlob {
-                    data: vec![1, 2, 3],
-                    encoding: StorageEncoding::Identity,
-                    uncompressed_size: 10,
-                },
-            )
+            .put(test_key.clone(), StoredBlob::identity(vec![1, 2, 3]))
             .expect("put should work");
 
         assert!(
             in_memory
                 .contains(&test_key)
-                .expect("contains should suceed")
+                .expect("contains should succeed")
         );
 
         assert_eq!(
-            in_memory.get(&test_key).expect("get should suceed"),
-            Some(StoredBlob {
-                data: vec![1, 2, 3],
-                encoding: StorageEncoding::Identity,
-                uncompressed_size: 10,
-            },),
+            in_memory.get(&test_key).expect("get should succeed"),
+            Some(StoredBlob::identity(vec![1, 2, 3])),
         );
     }
 }
