@@ -1,10 +1,10 @@
 use std::{collections::HashMap, sync::RwLock};
 
-use crate::storage::blob_store::{BlobKey, BlobStore, StorageError};
+use crate::storage::blob_store::{BlobKey, BlobStore, StorageError, StoredBlob};
 
 #[derive(Default)]
 pub struct InMemoryStore {
-    blobs: RwLock<HashMap<BlobKey, Vec<u8>>>,
+    blobs: RwLock<HashMap<BlobKey, StoredBlob>>,
 }
 
 impl InMemoryStore {
@@ -16,14 +16,14 @@ impl InMemoryStore {
 }
 
 impl BlobStore for InMemoryStore {
-    fn get(&self, key: &BlobKey) -> Result<Option<Vec<u8>>, StorageError> {
+    fn get(&self, key: &BlobKey) -> Result<Option<StoredBlob>, StorageError> {
         let blobs = self
             .blobs
             .read()
             .map_err(|_| StorageError::Unavailable("lock poisoned".into()))?;
         Ok((blobs.get(key)).cloned())
     }
-    fn put(&self, key: BlobKey, data: Vec<u8>) -> Result<(), StorageError> {
+    fn put(&self, key: BlobKey, data: StoredBlob) -> Result<(), StorageError> {
         let mut blobs = self
             .blobs
             .write()
@@ -42,7 +42,10 @@ impl BlobStore for InMemoryStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::{digest::DigestAlgorithm, storage::CacheKind};
+    use crate::{
+        digest::DigestAlgorithm,
+        storage::{CacheKind, blob_store::StorageEncoding},
+    };
 
     use super::*;
 
@@ -87,7 +90,14 @@ mod tests {
         };
 
         in_memory
-            .put(test_key.clone(), vec![1, 2, 3])
+            .put(
+                test_key.clone(),
+                StoredBlob {
+                    data: vec![1, 2, 3],
+                    encoding: StorageEncoding::Identity,
+                    uncompressed_size: 10,
+                },
+            )
             .expect("put should work");
 
         assert!(
@@ -98,7 +108,11 @@ mod tests {
 
         assert_eq!(
             in_memory.get(&test_key).expect("get should suceed"),
-            Some(vec![1, 2, 3]),
+            Some(StoredBlob {
+                data: vec![1, 2, 3],
+                encoding: StorageEncoding::Identity,
+                uncompressed_size: 10,
+            },),
         );
     }
 }

@@ -13,7 +13,7 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     digest::DigestAlgorithm,
-    storage::{BlobKey, BlobStore, CacheKind},
+    storage::{BlobCodec, BlobKey, BlobStore, CacheKind, StorageEncoding},
 };
 
 pub struct CasService {
@@ -76,14 +76,15 @@ impl ContentAddressableStorage for CasService {
         let request = request.into_inner();
         let mut responses = Vec::new();
 
-        for compressor in request.acceptable_compressors {
-            if compressor != 0 {
-                return Err(Status::invalid_argument("unsupported compression method"));
-            }
-        }
-
         let algorithm = DigestAlgorithm::resolve_proto_value(request.digest_function)
             .map_err(Status::invalid_argument)?;
+
+        let acceptable_encodings = request
+            .acceptable_compressors
+            .iter()
+            .copied()
+            .filter_map(StorageEncoding::from_proto_value)
+            .collect::<Vec<_>>();
 
         for digest in request.digests {
             let key = BlobKey {
@@ -96,28 +97,6 @@ impl ContentAddressableStorage for CasService {
             let ret = self.store.get(&key);
 
             let resp = match ret {
-                Ok(value) => match value {
-                    Some(blob) => BlobReadResponse {
-                        digest: Some(digest),
-                        data: blob,
-                        compressor: 0,
-                        status: Some(RpcStatus {
-                            code: 0,
-                            message: String::new(),
-                            details: vec![],
-                        }),
-                    },
-                    None => BlobReadResponse {
-                        digest: Some(digest),
-                        data: Vec::new(),
-                        compressor: 0,
-                        status: Some(RpcStatus {
-                            code: 5,
-                            message: String::new(),
-                            details: vec![],
-                        }),
-                    },
-                },
                 Err(err) => BlobReadResponse {
                     digest: Some(digest),
                     data: Vec::new(),
@@ -128,6 +107,45 @@ impl ContentAddressableStorage for CasService {
                         details: vec![],
                     }),
                 },
+                Ok(None) => BlobReadResponse {
+                    digest: Some(digest),
+                    data: Vec::new(),
+                    compressor: 0,
+                    status: Some(RpcStatus {
+                        code: 5,
+                        message: String::new(),
+                        details: vec![],
+                    }),
+                },
+                Ok(Some(blob)) => {
+                    let target = BlobCodec::select_batch_read_response_encoding(
+                        blob.metadata.encoding,
+                        &acceptable_encodings,
+                    );
+
+                    match BlobCodec::transcode(blob, target) {
+                        Ok(blob) => BlobReadResponse {
+                            digest: Some(digest),
+                            data: blob.data,
+                            compressor: blob.metadata.encoding.as_proto_value(),
+                            status: Some(RpcStatus {
+                                code: 0,
+                                message: String::new(),
+                                details: vec![],
+                            }),
+                        },
+                        Err(err) => BlobReadResponse {
+                            digest: Some(digest),
+                            data: Vec::new(),
+                            compressor: StorageEncoding::Identity.as_proto_value(),
+                            status: Some(RpcStatus {
+                                code: 13,
+                                message: err.to_string(),
+                                details: vec![],
+                            }),
+                        },
+                    }
+                }
             };
 
             responses.push(resp);
@@ -163,7 +181,7 @@ impl ContentAddressableStorage for CasService {
                 kind: CacheKind::ContentAddressableStorage,
             };
 
-            let status = match self.store.put(key, req.data) {
+            let status = match self.store.put(key, req.data.into()) {
                 Ok(()) => RpcStatus {
                     code: 0,
                     message: String::new(),

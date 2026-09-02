@@ -17,6 +17,7 @@ semver_proto = { path = "../semver-proto/" }
 status_proto = { path = "../status-proto/" }
 bytestream_proto = { path = "../bytestream-proto/" }
 thiserror = "2.0.20"
+zstd = "0.13.3"
 
 [dev-dependencies]
 tokio-stream = { version = "0.1.19", features = ["net"] }
