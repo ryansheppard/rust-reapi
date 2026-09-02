@@ -31,7 +31,7 @@ impl BlobCodec {
         blob.data = match (blob.metadata.encoding, target) {
             (StorageEncoding::Identity, StorageEncoding::Zstd) => compress_zstd(&blob.data)?,
             (StorageEncoding::Zstd, StorageEncoding::Identity) => {
-                decompress_zstd(&blob.data, blob.metadata.stored_size)?
+                decompress_zstd(&blob.data, blob.metadata.uncompressed_size)?
             }
             _ => return Err(CompressionError::Unsupported),
         };

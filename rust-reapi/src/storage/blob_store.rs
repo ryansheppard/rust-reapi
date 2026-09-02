@@ -47,7 +47,7 @@ impl StorageEncoding {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
-struct StoredBlobMetadata {
+pub struct StoredBlobMetadata {
     pub encoding: StorageEncoding,
     pub uncompressed_size: u64,
     pub stored_size: u64,
@@ -57,6 +57,21 @@ struct StoredBlobMetadata {
 pub struct StoredBlob {
     pub data: Vec<u8>,
     pub metadata: StoredBlobMetadata,
+}
+
+impl StoredBlob {
+    pub fn identity(data: Vec<u8>) -> Self {
+        let size = data.len() as u64;
+
+        Self {
+            data,
+            metadata: StoredBlobMetadata {
+                encoding: StorageEncoding::Identity,
+                uncompressed_size: size,
+                stored_size: size,
+            },
+        }
+    }
 }
 
 impl From<Vec<u8>> for StoredBlob {
