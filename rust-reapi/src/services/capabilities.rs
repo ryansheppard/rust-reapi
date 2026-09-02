@@ -1,7 +1,7 @@
 use remote_execution_proto::build::bazel::remote::execution::v2::{
     ActionCacheUpdateCapabilities, CacheCapabilities, ExecutionCapabilities,
     GetCapabilitiesRequest, ServerCapabilities, capabilities_server::Capabilities,
-    digest_function::Value as DigestFunction,
+    compressor::Value as Compressor, digest_function::Value as DigestFunction,
     symlink_absolute_path_strategy::Value as SymlinkAbsolutePathStrategy,
 };
 use semver_proto::build::bazel::semver::SemVer;
@@ -48,9 +48,8 @@ impl Capabilities for CapabilitiesService {
                 max_batch_total_size_bytes: 0,
                 max_cas_blob_size_bytes: 0,
                 symlink_absolute_path_strategy: SymlinkAbsolutePathStrategy::Disallowed as i32,
-                // TODO: Suppot compressors
-                supported_compressors: Vec::new(),
-                supported_batch_update_compressors: Vec::new(),
+                supported_compressors: vec![Compressor::Zstd as i32],
+                supported_batch_update_compressors: vec![Compressor::Zstd as i32],
                 // TODO: Support splicing
                 split_blob_support: false,
                 splice_blob_support: false,
@@ -85,6 +84,11 @@ mod tests {
 
         let cache = response.cache_capabilities.expect("cache capabilities");
         assert_eq!(cache.digest_functions, vec![DigestFunction::Sha256 as i32]);
+        assert_eq!(cache.supported_compressors, vec![Compressor::Zstd as i32]);
+        assert_eq!(
+            cache.supported_batch_update_compressors,
+            vec![Compressor::Zstd as i32]
+        );
         assert!(!cache.split_blob_support);
         assert!(!cache.splice_blob_support);
         assert!(cache.fast_cdc_2020_params.is_none());
