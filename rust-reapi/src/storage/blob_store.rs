@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use remote_execution_proto::build::bazel::remote::execution::v2::compressor;
 use thiserror::Error;
 
@@ -110,8 +111,9 @@ impl From<Vec<u8>> for StoredBlob {
     }
 }
 
+#[async_trait]
 pub trait BlobStore {
-    fn put(&self, key: BlobKey, data: StoredBlob) -> Result<(), StorageError>;
-    fn get(&self, key: &BlobKey) -> Result<Option<StoredBlob>, StorageError>;
-    fn contains(&self, key: &BlobKey) -> Result<bool, StorageError>;
+    async fn put(&self, key: BlobKey, data: StoredBlob) -> Result<(), StorageError>;
+    async fn get(&self, key: &BlobKey) -> Result<Option<StoredBlob>, StorageError>;
+    async fn contains(&self, key: &BlobKey) -> Result<bool, StorageError>;
 }

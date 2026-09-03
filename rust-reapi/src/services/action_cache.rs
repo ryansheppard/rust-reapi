@@ -32,7 +32,7 @@ impl ActionCacheService {
         }
     }
 
-    fn validate_action_result_artifacts(
+    async fn validate_action_result_artifacts(
         &self,
         instance: &str,
         algorithm: DigestAlgorithm,
@@ -62,6 +62,7 @@ impl ActionCacheService {
             let tree_bytes = self
                 .store
                 .get(&Self::cas_key(instance, algorithm, tree_digest))
+                .await
                 .map_err(|err| Status::internal(err.to_string()))?
                 .ok_or_else(|| Status::new(missing_code, "output tree is missing from CAS"))
                 .and_then(|blob| {
@@ -82,12 +83,14 @@ impl ActionCacheService {
                         Self::cas_key(instance, algorithm, &digest),
                         Vec::new().into(),
                     )
+                    .await
                     .map_err(|err| Status::internal(err.to_string()))?;
                 continue;
             }
             if !self
                 .store
                 .contains(&Self::cas_key(instance, algorithm, &digest))
+                .await
                 .map_err(|err| Status::internal(err.to_string()))?
             {
                 return Err(Status::new(
@@ -129,6 +132,7 @@ impl ActionCache for ActionCacheService {
         let bytes = self
             .store
             .get(&key)
+            .await
             .map_err(|err| Status::internal(err.to_string()))?
             .ok_or_else(|| Status::not_found("action result not cached"))
             .and_then(|blob| {
@@ -145,7 +149,8 @@ impl ActionCache for ActionCacheService {
             algorithm,
             &action_result,
             Code::NotFound,
-        )?;
+        )
+        .await?;
 
         Ok(Response::new(action_result))
     }
@@ -174,6 +179,7 @@ impl ActionCache for ActionCacheService {
                 algorithm,
                 action_digest,
             ))
+            .await
             .map_err(|err| Status::internal(err.to_string()))?
             .ok_or_else(|| Status::failed_precondition("action is missing from CAS"))
             .and_then(|blob| {
@@ -196,6 +202,7 @@ impl ActionCache for ActionCacheService {
                 algorithm,
                 &command_digest,
             ))
+            .await
             .map_err(|err| Status::internal(err.to_string()))?
         {
             return Err(Status::failed_precondition("command is missing from CAS"));
@@ -206,7 +213,8 @@ impl ActionCache for ActionCacheService {
             algorithm,
             action_result,
             Code::FailedPrecondition,
-        )?;
+        )
+        .await?;
 
         let action_key = BlobKey {
             instance: request.instance_name.clone(),
@@ -225,6 +233,7 @@ impl ActionCache for ActionCacheService {
                 })?;
         self.store
             .put(action_key, action_result_blob)
+            .await
             .map_err(|err| Status::internal(err.to_string()))?;
 
         Ok(Response::new(action_result.clone()))
@@ -329,12 +338,14 @@ mod tests {
                 key(ACTION_HASH, CacheKind::ActionCache),
                 expected.encode_to_vec().into(),
             )
+            .await
             .expect("action cache entry should be stored");
         store
             .put(
                 key(OUTPUT_HASH, CacheKind::ContentAddressableStorage),
                 b"out".to_vec().into(),
             )
+            .await
             .expect("output blob should be stored");
         let service = ActionCacheService::new(store);
 
@@ -355,6 +366,7 @@ mod tests {
                 key(ACTION_HASH, CacheKind::ActionCache),
                 action_result().encode_to_vec().into(),
             )
+            .await
             .expect("action cache entry should be stored");
         let service = ActionCacheService::new(store);
 

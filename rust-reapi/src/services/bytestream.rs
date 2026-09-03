@@ -98,6 +98,7 @@ impl ByteStream for ByteStreamService {
         let blob = self
             .store
             .get(&key)
+            .await
             .map_err(|err| Status::internal(err.to_string()))?
             .ok_or_else(|| Status::not_found("blob not found"))?;
         if blob.metadata().uncompressed_size()
@@ -211,6 +212,7 @@ impl ByteStream for ByteStreamService {
 
                 self.store
                     .put(key, stored)
+                    .await
                     .map_err(|err| Status::internal(err.to_string()))?;
                 return Ok(Response::new(WriteResponse { committed_size }));
             }

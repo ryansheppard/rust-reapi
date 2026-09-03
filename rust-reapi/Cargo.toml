@@ -19,6 +19,7 @@ bytestream_proto = { path = "../bytestream-proto/" }
 thiserror = "2.0.20"
 zstd = "0.13.3"
 sha2 = "0.10.9"
+async-trait = "0.1.92"
 
 [dev-dependencies]
 tokio-stream = { version = "0.1.19", features = ["net"] }
