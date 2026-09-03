@@ -40,14 +40,18 @@ async fn client_gets_a_cached_result_when_referenced_artifacts_exist()
         ..Default::default()
     };
 
-    store.put(
-        key(ACTION_HASH, CacheKind::ActionCache),
-        expected.encode_to_vec().into(),
-    )?;
-    store.put(
-        key(OUTPUT_HASH, CacheKind::ContentAddressableStorage),
-        b"out".to_vec().into(),
-    )?;
+    store
+        .put(
+            key(ACTION_HASH, CacheKind::ActionCache),
+            expected.encode_to_vec().into(),
+        )
+        .await?;
+    store
+        .put(
+            key(OUTPUT_HASH, CacheKind::ContentAddressableStorage),
+            b"out".to_vec().into(),
+        )
+        .await?;
 
     let actual = cache
         .get_action_result(Request::new(GetActionResultRequest {
@@ -98,18 +102,24 @@ async fn client_updates_and_then_reads_an_action_result() -> Result<(), Box<dyn 
         .encode_to_vec(),
         StorageEncoding::Zstd,
     )?;
-    store.put(
-        key(ACTION_HASH, CacheKind::ContentAddressableStorage),
-        action_blob,
-    )?;
-    store.put(
-        key(COMMAND_HASH, CacheKind::ContentAddressableStorage),
-        b"command".to_vec().into(),
-    )?;
-    store.put(
-        key(OUTPUT_HASH, CacheKind::ContentAddressableStorage),
-        b"out".to_vec().into(),
-    )?;
+    store
+        .put(
+            key(ACTION_HASH, CacheKind::ContentAddressableStorage),
+            action_blob,
+        )
+        .await?;
+    store
+        .put(
+            key(COMMAND_HASH, CacheKind::ContentAddressableStorage),
+            b"command".to_vec().into(),
+        )
+        .await?;
+    store
+        .put(
+            key(OUTPUT_HASH, CacheKind::ContentAddressableStorage),
+            b"out".to_vec().into(),
+        )
+        .await?;
 
     let updated = cache
         .update_action_result(Request::new(UpdateActionResultRequest {
@@ -122,7 +132,8 @@ async fn client_updates_and_then_reads_an_action_result() -> Result<(), Box<dyn 
         .into_inner();
     assert_eq!(updated, expected);
     let stored_result = store
-        .get(&key(ACTION_HASH, CacheKind::ActionCache))?
+        .get(&key(ACTION_HASH, CacheKind::ActionCache))
+        .await?
         .ok_or("missing stored action result")?;
     assert_eq!(stored_result.metadata().encoding(), StorageEncoding::Zstd);
 

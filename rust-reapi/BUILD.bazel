@@ -32,12 +32,15 @@ rust_library(
     ]),
     crate_name = "rust_reapi",
     edition = crate_edition(),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = [
         ":bytestream_proto",
         ":remote_execution_rust",
         ":semver_proto",
         ":status_proto",
-    ] + all_crate_deps(normal = True),
+    ] + all_crate_deps(
+        normal = True,
+    ),
 )
 
 rust_binary(
@@ -119,6 +122,7 @@ rust_test(
     ]),
     crate_root = "src/lib.rs",
     edition = crate_edition(),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
     deps = [
         ":bytestream_proto",
         ":remote_execution_rust",

@@ -27,7 +27,7 @@ impl CasService {
         Self { store }
     }
 
-    fn put_verified_blob(
+    async fn put_verified_blob(
         &self,
         key: BlobKey,
         algorithm: DigestAlgorithm,
@@ -57,6 +57,7 @@ impl CasService {
         })?;
         self.store
             .put(key, stored)
+            .await
             .map_err(|err| rpc_status(Code::Internal, err.to_string()))
     }
 }
@@ -100,6 +101,7 @@ impl ContentAddressableStorage for CasService {
             let exists = self
                 .store
                 .contains(&key)
+                .await
                 .map_err(|err| Status::internal(err.to_string()))?;
 
             if !exists {
@@ -137,7 +139,7 @@ impl ContentAddressableStorage for CasService {
                 kind: CacheKind::ContentAddressableStorage,
             };
 
-            let ret = self.store.get(&key);
+            let ret = self.store.get(&key).await;
 
             let resp = match ret {
                 Err(err) => BlobReadResponse {
@@ -234,7 +236,10 @@ impl ContentAddressableStorage for CasService {
                 kind: CacheKind::ContentAddressableStorage,
             };
 
-            let status = match self.put_verified_blob(key, algorithm, &digest, req.data, encoding) {
+            let status = match self
+                .put_verified_blob(key, algorithm, &digest, req.data, encoding)
+                .await
+            {
                 Ok(()) => rpc_status(Code::Ok, String::new()),
                 Err(status) => status,
             };
