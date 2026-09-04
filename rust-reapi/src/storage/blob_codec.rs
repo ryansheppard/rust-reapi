@@ -1,5 +1,11 @@
-use crate::storage::blob_store::{StorageEncoding, StoredBlob};
+use std::io::Cursor;
+
+use crate::storage::{
+    StoredBlobMetadata,
+    blob_store::{BlobRead, StorageEncoding},
+};
 use thiserror::Error;
+use tokio::io::AsyncReadExt;
 
 /// Maximum uncompressed size accepted by the in-process blob codec (100 MiB).
 pub const MAX_DECOMPRESSED_BLOB_SIZE: u64 = 100 * 1024 * 1024;
@@ -25,43 +31,66 @@ impl BlobCodec {
     const RESPONSE_PRIORITY: &'static [StorageEncoding] =
         &[StorageEncoding::Zstd, StorageEncoding::Identity];
 
-    pub fn into_identity_data(blob: StoredBlob) -> Result<Vec<u8>, CompressionError> {
-        Self::transcode(blob, StorageEncoding::Identity).map(|blob| blob.data)
+    pub async fn into_identity_data(blob: BlobRead) -> Result<Vec<u8>, CompressionError> {
+        let mut body = Self::transcode(blob, StorageEncoding::Identity)
+            .await?
+            .into_body();
+        let mut data = Vec::new();
+        body.read_to_end(&mut data).await?;
+        Ok(data)
     }
 
-    pub fn from_identity_data(
+    pub async fn from_identity_data(
         data: Vec<u8>,
         target: StorageEncoding,
-    ) -> Result<StoredBlob, CompressionError> {
-        Self::transcode(StoredBlob::identity(data), target)
+    ) -> Result<BlobRead, CompressionError> {
+        Self::transcode(BlobRead::identity(data), target).await
     }
 
-    pub fn transcode(
-        mut blob: StoredBlob,
+    pub async fn transcode(
+        blob: BlobRead,
         target: StorageEncoding,
-    ) -> Result<StoredBlob, CompressionError> {
-        if blob.metadata.uncompressed_size > MAX_DECOMPRESSED_BLOB_SIZE {
+    ) -> Result<BlobRead, CompressionError> {
+        let metadata = blob.metadata().clone();
+        if metadata.uncompressed_size > MAX_DECOMPRESSED_BLOB_SIZE {
             return Err(CompressionError::DecompressedSizeLimitExceeded {
-                actual: blob.metadata.uncompressed_size,
+                actual: metadata.uncompressed_size,
                 limit: MAX_DECOMPRESSED_BLOB_SIZE,
             });
         }
 
-        if blob.metadata.encoding == target {
+        if metadata.encoding == target {
             return Ok(blob);
         }
 
-        blob.data = match (blob.metadata.encoding, target) {
-            (StorageEncoding::Identity, StorageEncoding::Zstd) => compress_zstd(&blob.data)?,
+        let mut body = blob.into_body();
+        let mut data = Vec::new();
+        body.read_to_end(&mut data).await?;
+
+        data = match (metadata.encoding, target) {
+            (StorageEncoding::Identity, StorageEncoding::Zstd) => {
+                if data.len() as u64 != metadata.uncompressed_size {
+                    return Err(CompressionError::SizeMismatch(
+                        metadata.uncompressed_size,
+                        data.len() as u64,
+                    ));
+                }
+                compress_zstd(&data)?
+            }
             (StorageEncoding::Zstd, StorageEncoding::Identity) => {
-                decompress_zstd(&blob.data, blob.metadata.uncompressed_size)?
+                decompress_zstd(&data, metadata.uncompressed_size)?
             }
             _ => return Err(CompressionError::Unsupported),
         };
 
-        blob.metadata.encoding = target;
-        blob.metadata.stored_size = blob.data.len() as u64;
-        Ok(blob)
+        Ok(BlobRead::new(
+            StoredBlobMetadata {
+                encoding: target,
+                stored_size: data.len() as u64,
+                uncompressed_size: metadata.uncompressed_size,
+            },
+            Box::pin(Cursor::new(data)),
+        ))
     }
 
     pub fn select_batch_read_response_encoding(
@@ -113,65 +142,68 @@ fn decompress_zstd(data: &[u8], expected_size: u64) -> Result<Vec<u8>, Compressi
 mod tests {
     use super::*;
 
-    #[test]
-    fn identity_data_round_trips_through_zstd() -> Result<(), CompressionError> {
+    #[tokio::test]
+    async fn identity_data_round_trips_through_zstd() -> Result<(), CompressionError> {
         let expected = b"action result payload".to_vec();
 
-        let blob = BlobCodec::from_identity_data(expected.clone(), StorageEncoding::Zstd)?;
-        assert_eq!(blob.metadata.encoding, StorageEncoding::Zstd);
-        assert_eq!(blob.metadata.uncompressed_size, expected.len() as u64);
-        assert_eq!(blob.metadata.stored_size, blob.data.len() as u64);
+        let blob = BlobCodec::from_identity_data(expected.clone(), StorageEncoding::Zstd).await?;
+        assert_eq!(blob.metadata().encoding(), StorageEncoding::Zstd);
+        assert_eq!(blob.metadata().uncompressed_size(), expected.len() as u64);
+        assert!(blob.metadata().stored_size() > 0);
 
-        let actual = BlobCodec::into_identity_data(blob)?;
+        let actual = BlobCodec::into_identity_data(blob).await?;
         assert_eq!(actual, expected);
         Ok(())
     }
 
-    #[test]
-    fn identity_helpers_do_not_reencode_identity_data() -> Result<(), CompressionError> {
+    #[tokio::test]
+    async fn identity_helpers_preserve_identity_data() -> Result<(), CompressionError> {
         let expected = b"uncompressed payload".to_vec();
 
-        let blob = BlobCodec::from_identity_data(expected.clone(), StorageEncoding::Identity)?;
-        assert_eq!(blob, StoredBlob::identity(expected.clone()));
+        let blob =
+            BlobCodec::from_identity_data(expected.clone(), StorageEncoding::Identity).await?;
+        assert_eq!(blob.metadata().encoding(), StorageEncoding::Identity);
+        assert_eq!(blob.metadata().uncompressed_size(), expected.len() as u64);
+        assert_eq!(blob.metadata().stored_size(), expected.len() as u64);
 
-        let actual = BlobCodec::into_identity_data(blob)?;
+        let actual = BlobCodec::into_identity_data(blob).await?;
         assert_eq!(actual, expected);
         Ok(())
     }
 
-    #[test]
-    fn transcode_is_a_no_op_when_encoding_matches() -> Result<(), CompressionError> {
-        let expected =
-            BlobCodec::from_identity_data(b"already compressed".to_vec(), StorageEncoding::Zstd)?;
+    #[tokio::test]
+    async fn transcode_is_a_no_op_when_encoding_matches() -> Result<(), CompressionError> {
+        let expected = b"already compressed".to_vec();
+        let blob = BlobCodec::from_identity_data(expected.clone(), StorageEncoding::Zstd).await?;
 
-        let actual = BlobCodec::transcode(expected.clone(), StorageEncoding::Zstd)?;
-        assert_eq!(actual, expected);
+        let actual = BlobCodec::transcode(blob, StorageEncoding::Zstd).await?;
+        assert_eq!(actual.metadata().encoding(), StorageEncoding::Zstd);
+        assert_eq!(BlobCodec::into_identity_data(actual).await?, expected);
         Ok(())
     }
 
-    #[test]
-    fn decompression_rejects_incorrect_uncompressed_size() -> Result<(), CompressionError> {
-        let compressed =
-            BlobCodec::from_identity_data(b"size checked".to_vec(), StorageEncoding::Zstd)?;
-        let blob = StoredBlob::encoded(compressed.into_data(), StorageEncoding::Zstd, 3);
+    #[tokio::test]
+    async fn decompression_rejects_incorrect_uncompressed_size() -> Result<(), CompressionError> {
+        let compressed = compress_zstd(b"size checked")?;
+        let blob = BlobRead::encoded(compressed, StorageEncoding::Zstd, 3);
 
         assert!(matches!(
-            BlobCodec::into_identity_data(blob),
+            BlobCodec::into_identity_data(blob).await,
             Err(CompressionError::SizeMismatch(3, 4))
         ));
         Ok(())
     }
 
-    #[test]
-    fn decompression_rejects_declared_size_above_limit_before_decoding() {
-        let blob = StoredBlob::encoded(
+    #[tokio::test]
+    async fn decompression_rejects_declared_size_above_limit_before_decoding() {
+        let blob = BlobRead::encoded(
             b"not a zstd frame".to_vec(),
             StorageEncoding::Zstd,
             MAX_DECOMPRESSED_BLOB_SIZE + 1,
         );
 
         assert!(matches!(
-            BlobCodec::into_identity_data(blob),
+            BlobCodec::into_identity_data(blob).await,
             Err(CompressionError::DecompressedSizeLimitExceeded {
                 actual,
                 limit: MAX_DECOMPRESSED_BLOB_SIZE,
@@ -179,15 +211,24 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn decompression_rejects_truncated_zstd() -> Result<(), CompressionError> {
-        let mut compressed =
-            BlobCodec::from_identity_data(b"truncated payload".to_vec(), StorageEncoding::Zstd)?;
-        compressed.data.truncate(compressed.data.len() / 2);
-        compressed.metadata.stored_size = compressed.data.len() as u64;
+    #[tokio::test]
+    async fn decompression_rejects_truncated_zstd() -> Result<(), CompressionError> {
+        let mut compressed = compress_zstd(b"truncated payload")?;
+        compressed.truncate(compressed.len() / 2);
+        let blob = BlobRead::encoded(compressed, StorageEncoding::Zstd, 17);
 
-        assert!(BlobCodec::into_identity_data(compressed).is_err());
+        assert!(BlobCodec::into_identity_data(blob).await.is_err());
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn compression_rejects_identity_data_with_wrong_declared_size() {
+        let blob = BlobRead::encoded(b"size checked".to_vec(), StorageEncoding::Identity, 3);
+
+        assert!(matches!(
+            BlobCodec::transcode(blob, StorageEncoding::Zstd).await,
+            Err(CompressionError::SizeMismatch(3, 12))
+        ));
     }
 
     #[test]

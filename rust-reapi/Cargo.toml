@@ -11,7 +11,12 @@ tonic = "0.14.6"
 prost = "0.14.4"
 prost-types = "0.14.4"
 tonic-prost = "0.14.6"
-tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "net"] }
+tokio = { version = "1.53.1", features = [
+  "macros",
+  "rt-multi-thread",
+  "net",
+  "io-util",
+] }
 remote_execution_proto = { path = "../rust-reapi-proto/" }
 semver_proto = { path = "../semver-proto/" }
 status_proto = { path = "../status-proto/" }

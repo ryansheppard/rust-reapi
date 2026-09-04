@@ -4,7 +4,7 @@ use remote_execution_proto::build::bazel::remote::execution::v2::{
 };
 use rust_reapi::{
     digest::DigestAlgorithm,
-    storage::{BlobCodec, BlobKey, BlobStore, CacheKind, StorageEncoding},
+    storage::{BlobCodec, BlobKey, BlobRead, BlobStore, CacheKind, StorageEncoding, StorageError},
 };
 use tonic::Request;
 
@@ -24,6 +24,24 @@ fn key(hash: &str, kind: CacheKind) -> BlobKey {
     }
 }
 
+async fn put_blob(
+    store: &impl BlobStore,
+    key: BlobKey,
+    blob: BlobRead,
+) -> Result<(), StorageError> {
+    store
+        .put(key, blob.metadata().clone(), blob.into_body())
+        .await
+}
+
+async fn put_identity(
+    store: &impl BlobStore,
+    key: BlobKey,
+    data: Vec<u8>,
+) -> Result<(), StorageError> {
+    put_blob(store, key, BlobRead::identity(data)).await
+}
+
 #[tokio::test]
 async fn client_gets_a_cached_result_when_referenced_artifacts_exist()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -40,18 +58,18 @@ async fn client_gets_a_cached_result_when_referenced_artifacts_exist()
         ..Default::default()
     };
 
-    store
-        .put(
-            key(ACTION_HASH, CacheKind::ActionCache),
-            expected.encode_to_vec().into(),
-        )
-        .await?;
-    store
-        .put(
-            key(OUTPUT_HASH, CacheKind::ContentAddressableStorage),
-            b"out".to_vec().into(),
-        )
-        .await?;
+    put_identity(
+        &*store,
+        key(ACTION_HASH, CacheKind::ActionCache),
+        expected.encode_to_vec(),
+    )
+    .await?;
+    put_identity(
+        &*store,
+        key(OUTPUT_HASH, CacheKind::ContentAddressableStorage),
+        b"out".to_vec(),
+    )
+    .await?;
 
     let actual = cache
         .get_action_result(Request::new(GetActionResultRequest {
@@ -101,25 +119,26 @@ async fn client_updates_and_then_reads_an_action_result() -> Result<(), Box<dyn 
         }
         .encode_to_vec(),
         StorageEncoding::Zstd,
-    )?;
-    store
-        .put(
-            key(ACTION_HASH, CacheKind::ContentAddressableStorage),
-            action_blob,
-        )
-        .await?;
-    store
-        .put(
-            key(COMMAND_HASH, CacheKind::ContentAddressableStorage),
-            b"command".to_vec().into(),
-        )
-        .await?;
-    store
-        .put(
-            key(OUTPUT_HASH, CacheKind::ContentAddressableStorage),
-            b"out".to_vec().into(),
-        )
-        .await?;
+    )
+    .await?;
+    put_blob(
+        &*store,
+        key(ACTION_HASH, CacheKind::ContentAddressableStorage),
+        action_blob,
+    )
+    .await?;
+    put_identity(
+        &*store,
+        key(COMMAND_HASH, CacheKind::ContentAddressableStorage),
+        b"command".to_vec(),
+    )
+    .await?;
+    put_identity(
+        &*store,
+        key(OUTPUT_HASH, CacheKind::ContentAddressableStorage),
+        b"out".to_vec(),
+    )
+    .await?;
 
     let updated = cache
         .update_action_result(Request::new(UpdateActionResultRequest {

@@ -4,6 +4,7 @@ mod in_memory;
 
 pub use blob_codec::{BlobCodec, CompressionError, MAX_DECOMPRESSED_BLOB_SIZE};
 pub use blob_store::{
-    BlobKey, BlobStore, CacheKind, StorageEncoding, StorageError, StoredBlob, StoredBlobMetadata,
+    BlobKey, BlobRead, BlobReader, BlobStore, CacheKind, StorageEncoding, StorageError,
+    StoredBlobMetadata,
 };
 pub use in_memory::InMemoryStore;

@@ -1,5 +1,7 @@
 use std::{num::ParseIntError, pin::Pin, sync::Arc};
 
+use tokio::io::AsyncReadExt;
+
 use bytestream_proto::google::bytestream::{
     QueryWriteStatusRequest, QueryWriteStatusResponse, ReadRequest, ReadResponse, WriteRequest,
     WriteResponse, byte_stream_server::ByteStream,
@@ -8,7 +10,7 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     digest::DigestAlgorithm,
-    storage::{BlobCodec, BlobKey, BlobStore, CacheKind, StorageEncoding, StoredBlob},
+    storage::{BlobCodec, BlobKey, BlobRead, BlobStore, CacheKind, StorageEncoding},
 };
 
 const READ_CHUNK_SIZE: usize = 64 * 1024;
@@ -108,6 +110,7 @@ impl ByteStream for ByteStreamService {
             return Err(Status::not_found("blob size does not match resource name"));
         }
         let identity = BlobCodec::into_identity_data(blob)
+            .await
             .map_err(|err| Status::internal(format!("failed to decompress blob: {err}")))?;
         key.algorithm
             .validate(&parsed.hash, parsed.expected_size, &identity)
@@ -129,9 +132,15 @@ impl ByteStream for ByteStreamService {
             };
             available[..limit].to_vec()
         } else {
-            BlobCodec::from_identity_data(available, response_encoding)
+            let mut body = BlobCodec::from_identity_data(available, response_encoding)
+                .await
                 .map_err(|err| Status::internal(format!("failed to compress blob: {err}")))?
-                .into_data()
+                .into_body();
+            let mut data = Vec::new();
+            body.read_to_end(&mut data).await.map_err(|err| {
+                Status::internal(format!("failed to read compressed blob: {err}"))
+            })?;
+            data
         };
 
         let responses = data
@@ -195,23 +204,26 @@ impl ByteStream for ByteStreamService {
                 let incoming_encoding = parsed.compression.storage_encoding()?;
                 let expected_size = u64::try_from(parsed.expected_size)
                     .map_err(|_| Status::invalid_argument("resource size must not be negative"))?;
-                let incoming = StoredBlob::encoded(accumulator, incoming_encoding, expected_size);
+                let incoming = BlobRead::encoded(accumulator, incoming_encoding, expected_size);
                 let committed_size = i64::try_from(incoming.metadata().stored_size())
                     .map_err(|_| Status::internal("blob exceeds expected size"))?;
-                let identity = BlobCodec::into_identity_data(incoming).map_err(|err| {
-                    Status::invalid_argument(format!("invalid compressed blob: {err}"))
-                })?;
+                let identity = BlobCodec::into_identity_data(incoming)
+                    .await
+                    .map_err(|err| {
+                        Status::invalid_argument(format!("invalid compressed blob: {err}"))
+                    })?;
                 key.algorithm
                     .validate(&parsed.hash, parsed.expected_size, &identity)
                     .map_err(|err| Status::invalid_argument(err.to_string()))?;
 
-                let stored =
-                    BlobCodec::from_identity_data(identity, STORAGE_ENCODING).map_err(|err| {
+                let stored = BlobCodec::from_identity_data(identity, STORAGE_ENCODING)
+                    .await
+                    .map_err(|err| {
                         Status::internal(format!("failed to encode blob for storage: {err}"))
                     })?;
 
                 self.store
-                    .put(key, stored)
+                    .put(key, stored.metadata().clone(), stored.into_body())
                     .await
                     .map_err(|err| Status::internal(err.to_string()))?;
                 return Ok(Response::new(WriteResponse { committed_size }));

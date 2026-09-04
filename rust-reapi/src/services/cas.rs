@@ -1,5 +1,7 @@
 use std::{pin::Pin, sync::Arc};
 
+use tokio::io::AsyncReadExt;
+
 use remote_execution_proto::build::bazel::remote::execution::v2::{
     BatchReadBlobsRequest, BatchReadBlobsResponse, BatchUpdateBlobsRequest,
     BatchUpdateBlobsResponse, Digest, FindMissingBlobsRequest, FindMissingBlobsResponse,
@@ -13,7 +15,7 @@ use tonic::{Code, Request, Response, Status};
 
 use crate::{
     digest::DigestAlgorithm,
-    storage::{BlobCodec, BlobKey, BlobStore, CacheKind, StorageEncoding, StoredBlob},
+    storage::{BlobCodec, BlobKey, BlobRead, BlobStore, CacheKind, StorageEncoding},
 };
 
 const STORAGE_ENCODING: StorageEncoding = StorageEncoding::Zstd;
@@ -37,26 +39,30 @@ impl CasService {
     ) -> Result<(), RpcStatus> {
         let expected_size = u64::try_from(digest.size_bytes)
             .map_err(|_| rpc_status(Code::InvalidArgument, "digest size must not be negative"))?;
-        let incoming = StoredBlob::encoded(data, encoding, expected_size);
-        let identity = BlobCodec::into_identity_data(incoming).map_err(|err| {
-            rpc_status(
-                Code::InvalidArgument,
-                format!("invalid compressed blob: {err}"),
-            )
-        })?;
+        let incoming = BlobRead::encoded(data, encoding, expected_size);
+        let identity = BlobCodec::into_identity_data(incoming)
+            .await
+            .map_err(|err| {
+                rpc_status(
+                    Code::InvalidArgument,
+                    format!("invalid compressed blob: {err}"),
+                )
+            })?;
 
         algorithm
             .validate(&digest.hash, digest.size_bytes, &identity)
             .map_err(|err| rpc_status(Code::InvalidArgument, err.to_string()))?;
 
-        let stored = BlobCodec::from_identity_data(identity, STORAGE_ENCODING).map_err(|err| {
-            rpc_status(
-                Code::Internal,
-                format!("failed to encode blob for storage: {err}"),
-            )
-        })?;
+        let stored = BlobCodec::from_identity_data(identity, STORAGE_ENCODING)
+            .await
+            .map_err(|err| {
+                rpc_status(
+                    Code::Internal,
+                    format!("failed to encode blob for storage: {err}"),
+                )
+            })?;
         self.store
-            .put(key, stored)
+            .put(key, stored.metadata().clone(), stored.into_body())
             .await
             .map_err(|err| rpc_status(Code::Internal, err.to_string()))
     }
@@ -164,21 +170,39 @@ impl ContentAddressableStorage for CasService {
                 },
                 Ok(Some(blob)) => {
                     let target = BlobCodec::select_batch_read_response_encoding(
-                        blob.metadata.encoding,
+                        blob.metadata().encoding,
                         &acceptable_encodings,
                     );
 
-                    match BlobCodec::transcode(blob, target) {
-                        Ok(blob) => BlobReadResponse {
-                            digest: Some(digest),
-                            data: blob.data,
-                            compressor: blob.metadata.encoding.as_proto_value(),
-                            status: Some(RpcStatus {
-                                code: 0,
-                                message: String::new(),
-                                details: vec![],
-                            }),
-                        },
+                    match BlobCodec::transcode(blob, target).await {
+                        Ok(blob) => {
+                            let compressor = blob.metadata().encoding().as_proto_value();
+                            let mut body = blob.into_body();
+                            let mut data = Vec::new();
+
+                            match body.read_to_end(&mut data).await {
+                                Ok(_) => BlobReadResponse {
+                                    digest: Some(digest),
+                                    data,
+                                    compressor,
+                                    status: Some(RpcStatus {
+                                        code: 0,
+                                        message: String::new(),
+                                        details: vec![],
+                                    }),
+                                },
+                                Err(err) => BlobReadResponse {
+                                    digest: Some(digest),
+                                    data: Vec::new(),
+                                    compressor: StorageEncoding::Identity.as_proto_value(),
+                                    status: Some(RpcStatus {
+                                        code: 13,
+                                        message: err.to_string(),
+                                        details: vec![],
+                                    }),
+                                },
+                            }
+                        }
                         Err(err) => BlobReadResponse {
                             digest: Some(digest),
                             data: Vec::new(),

@@ -1,6 +1,9 @@
+use std::{io::Cursor, pin::Pin};
+
 use async_trait::async_trait;
 use remote_execution_proto::build::bazel::remote::execution::v2::compressor;
 use thiserror::Error;
+use tokio::io::AsyncRead;
 
 use crate::digest::DigestAlgorithm;
 
@@ -8,6 +11,9 @@ use crate::digest::DigestAlgorithm;
 pub enum StorageError {
     #[error("storage unavailable: {0}")]
     Unavailable(String),
+
+    #[error("storage I/O error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
@@ -68,13 +74,27 @@ impl StoredBlobMetadata {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub struct StoredBlob {
-    pub(crate) data: Vec<u8>,
-    pub(crate) metadata: StoredBlobMetadata,
+pub type BlobReader = Pin<Box<dyn AsyncRead + Send + 'static>>;
+
+// #[derive(Debug)]
+pub struct BlobRead {
+    metadata: StoredBlobMetadata,
+    body: BlobReader,
 }
 
-impl StoredBlob {
+impl BlobRead {
+    pub fn new(metadata: StoredBlobMetadata, body: BlobReader) -> Self {
+        Self { metadata, body }
+    }
+
+    pub fn metadata(&self) -> &StoredBlobMetadata {
+        &self.metadata
+    }
+
+    pub fn into_body(self) -> BlobReader {
+        self.body
+    }
+
     pub fn identity(data: Vec<u8>) -> Self {
         let size = data.len() as u64;
         Self::encoded(data, StorageEncoding::Identity, size)
@@ -82,8 +102,11 @@ impl StoredBlob {
 
     pub fn encoded(data: Vec<u8>, encoding: StorageEncoding, uncompressed_size: u64) -> Self {
         let stored_size = data.len() as u64;
+
+        let body = Box::pin(Cursor::new(data));
+
         Self {
-            data,
+            body,
             metadata: StoredBlobMetadata {
                 encoding,
                 uncompressed_size,
@@ -91,29 +114,16 @@ impl StoredBlob {
             },
         }
     }
-
-    pub fn data(&self) -> &[u8] {
-        &self.data
-    }
-
-    pub fn into_data(self) -> Vec<u8> {
-        self.data
-    }
-
-    pub fn metadata(&self) -> &StoredBlobMetadata {
-        &self.metadata
-    }
-}
-
-impl From<Vec<u8>> for StoredBlob {
-    fn from(data: Vec<u8>) -> Self {
-        Self::identity(data)
-    }
 }
 
 #[async_trait]
 pub trait BlobStore {
-    async fn put(&self, key: BlobKey, data: StoredBlob) -> Result<(), StorageError>;
-    async fn get(&self, key: &BlobKey) -> Result<Option<StoredBlob>, StorageError>;
+    async fn get(&self, key: &BlobKey) -> Result<Option<BlobRead>, StorageError>;
+    async fn put(
+        &self,
+        key: BlobKey,
+        metadata: StoredBlobMetadata,
+        body: BlobReader,
+    ) -> Result<(), StorageError>;
     async fn contains(&self, key: &BlobKey) -> Result<bool, StorageError>;
 }
