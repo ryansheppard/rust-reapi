@@ -9,7 +9,7 @@ use tonic::{Code, Request, Response, Status};
 
 use crate::{
     digest::DigestAlgorithm,
-    storage::{BlobCodec, BlobKey, BlobStore, CacheKind, StorageEncoding},
+    storage::{BlobCodec, BlobKey, BlobRead, BlobStore, CacheKind, StorageEncoding},
 };
 
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
@@ -59,16 +59,16 @@ impl ActionCacheService {
             let tree_digest = output_directory.tree_digest.as_ref().ok_or_else(|| {
                 Status::new(missing_code, "output directory is missing its tree digest")
             })?;
-            let tree_bytes = self
+            let tree_blob = self
                 .store
                 .get(&Self::cas_key(instance, algorithm, tree_digest))
                 .await
                 .map_err(|err| Status::internal(err.to_string()))?
-                .ok_or_else(|| Status::new(missing_code, "output tree is missing from CAS"))
-                .and_then(|blob| {
-                    BlobCodec::into_identity_data(blob).map_err(|err| {
-                        Status::internal(format!("failed to decompress output tree: {err}"))
-                    })
+                .ok_or_else(|| Status::new(missing_code, "output tree is missing from CAS"))?;
+            let tree_bytes = BlobCodec::into_identity_data(tree_blob)
+                .await
+                .map_err(|err| {
+                    Status::internal(format!("failed to decompress output tree: {err}"))
                 })?;
             let tree = Tree::decode(tree_bytes.as_slice())
                 .map_err(|err| Status::internal(format!("invalid output tree: {err}")))?;
@@ -78,10 +78,12 @@ impl ActionCacheService {
         for digest in digests {
             // NOTE: bazel stores empty stdout or something
             if digest.size_bytes == 0 && digest.hash == EMPTY_SHA256 {
+                let empty_blob = BlobRead::identity(Vec::new());
                 self.store
                     .put(
                         Self::cas_key(instance, algorithm, &digest),
-                        Vec::new().into(),
+                        empty_blob.metadata().clone(),
+                        empty_blob.into_body(),
                     )
                     .await
                     .map_err(|err| Status::internal(err.to_string()))?;
@@ -129,17 +131,15 @@ impl ActionCache for ActionCacheService {
             kind: CacheKind::ActionCache,
         };
 
-        let bytes = self
+        let blob = self
             .store
             .get(&key)
             .await
             .map_err(|err| Status::internal(err.to_string()))?
-            .ok_or_else(|| Status::not_found("action result not cached"))
-            .and_then(|blob| {
-                BlobCodec::into_identity_data(blob).map_err(|err| {
-                    Status::internal(format!("failed to decompress action result: {err}"))
-                })
-            })?;
+            .ok_or_else(|| Status::not_found("action result not cached"))?;
+        let bytes = BlobCodec::into_identity_data(blob).await.map_err(|err| {
+            Status::internal(format!("failed to decompress action result: {err}"))
+        })?;
 
         let action_result = ActionResult::decode(bytes.as_slice())
             .map_err(|err| Status::internal(format!("invalid cached ActionResult: {err}")))?;
@@ -172,7 +172,7 @@ impl ActionCache for ActionCacheService {
         let algorithm = DigestAlgorithm::resolve_proto_value(request.digest_function)
             .map_err(Status::invalid_argument)?;
 
-        let action_bytes = self
+        let action_blob = self
             .store
             .get(&Self::cas_key(
                 &request.instance_name,
@@ -181,13 +181,11 @@ impl ActionCache for ActionCacheService {
             ))
             .await
             .map_err(|err| Status::internal(err.to_string()))?
-            .ok_or_else(|| Status::failed_precondition("action is missing from CAS"))
-            .and_then(|blob| {
-                BlobCodec::into_identity_data(blob).map_err(|err| {
-                    Status::failed_precondition(format!(
-                        "failed to decompress Action in CAS: {err}"
-                    ))
-                })
+            .ok_or_else(|| Status::failed_precondition("action is missing from CAS"))?;
+        let action_bytes = BlobCodec::into_identity_data(action_blob)
+            .await
+            .map_err(|err| {
+                Status::failed_precondition(format!("failed to decompress Action in CAS: {err}"))
             })?;
         let action = Action::decode(action_bytes.as_slice())
             .map_err(|err| Status::failed_precondition(format!("invalid Action in CAS: {err}")))?;
@@ -228,11 +226,16 @@ impl ActionCache for ActionCacheService {
             .ok_or_else(|| Status::invalid_argument("missing action result"))?;
         let action_result_blob =
             BlobCodec::from_identity_data(action_result.encode_to_vec(), StorageEncoding::Zstd)
+                .await
                 .map_err(|err| {
                     Status::internal(format!("failed to compress action result: {err}"))
                 })?;
         self.store
-            .put(action_key, action_result_blob)
+            .put(
+                action_key,
+                action_result_blob.metadata().clone(),
+                action_result_blob.into_body(),
+            )
             .await
             .map_err(|err| Status::internal(err.to_string()))?;
 
@@ -333,17 +336,21 @@ mod tests {
     async fn returns_cached_result_when_all_output_blobs_exist() {
         let store = Arc::new(InMemoryStore::new());
         let expected = action_result();
+        let action_blob = BlobRead::identity(expected.encode_to_vec());
         store
             .put(
                 key(ACTION_HASH, CacheKind::ActionCache),
-                expected.encode_to_vec().into(),
+                action_blob.metadata().clone(),
+                action_blob.into_body(),
             )
             .await
             .expect("action cache entry should be stored");
+        let output_blob = BlobRead::identity(b"out".to_vec());
         store
             .put(
                 key(OUTPUT_HASH, CacheKind::ContentAddressableStorage),
-                b"out".to_vec().into(),
+                output_blob.metadata().clone(),
+                output_blob.into_body(),
             )
             .await
             .expect("output blob should be stored");
@@ -361,10 +368,12 @@ mod tests {
     #[tokio::test]
     async fn returns_not_found_when_cached_output_blob_is_missing() {
         let store = Arc::new(InMemoryStore::new());
+        let action_blob = BlobRead::identity(action_result().encode_to_vec());
         store
             .put(
                 key(ACTION_HASH, CacheKind::ActionCache),
-                action_result().encode_to_vec().into(),
+                action_blob.metadata().clone(),
+                action_blob.into_body(),
             )
             .await
             .expect("action cache entry should be stored");
