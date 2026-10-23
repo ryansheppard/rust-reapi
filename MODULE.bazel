@@ -3,25 +3,39 @@ module(
     version = "1.0",
 )
 
-bazel_dep(name = "rules_rust", version = "0.73.0")
-bazel_dep(name = "rules_rust_prost", version = "0.73.0")
+bazel_dep(name = "rules_rs", version = "0.1.3")
+bazel_dep(name = "llvm", version = "0.8.25")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "rules_proto", version = "7.1.0")
+bazel_dep(name = "zstd", version = "1.5.7.bcr.1")
 
 # because of gRPC pinned in remote-apis
 bazel_dep(name = "grpc", version = "1.83.0")
 
-rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
-rust.toolchain(
+toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
+toolchains.toolchain(
     edition = "2024",
-    versions = ["1.98.0"],
+    version = "1.98.0",
+)
+use_repo(toolchains, "default_rust_toolchains")
+
+rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
+use_repo(rules_rust, "rules_rust")
+
+rules_rust_prost = use_extension("@rules_rs//rs:rules_rust_prost.bzl", "rules_rust_prost")
+use_repo(rules_rust_prost, "rules_rust_prost")
+
+register_toolchains(
+    "@default_rust_toolchains//...",
+    "@llvm//toolchain:all",
 )
 
-crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
 crate.from_cargo(
     name = "crates",
-    cargo_lockfile = "//:Cargo.lock",
-    manifests = ["//:Cargo.toml"],
+    cargo_lock = "//:Cargo.lock",
+    cargo_toml = "//:Cargo.toml",
+    platform_triples = ["x86_64-unknown-linux-gnu"],
 )
 crate.annotation(
     crate = "protoc-gen-prost",
@@ -30,6 +44,11 @@ crate.annotation(
 crate.annotation(
     crate = "protoc-gen-tonic",
     gen_binaries = ["protoc-gen-tonic"],
+)
+crate.annotation(
+    crate = "zstd-sys",
+    gen_build_script = "off",
+    deps = ["@zstd"],
 )
 use_repo(crate, "crates")
 
